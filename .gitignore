@@ -1,0 +1,13 @@
+.env
+.env.local
+node_modules/
+.next/
+dist/
+coverage/
+*.log
+tmp/
+backend/tmp/
+frontend/.turbo/
+.gocache/
+.pnpm-store/
+.agents/

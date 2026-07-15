@@ -1,0 +1,48 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: qr_generator_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: qr_generator
+      MYSQL_USER: qr_user
+      MYSQL_PASSWORD: qr_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    container_name: qr_generator_backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env.example
+    environment:
+      APP_ENV: docker
+      DB_HOST: mysql
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: qr_generator_frontend
+    depends_on:
+      - backend
+    env_file:
+      - ./frontend/.env.example
+    ports:
+      - "3000:3000"
+
+volumes:
+  mysql_data:
