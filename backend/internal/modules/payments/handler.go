@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"qr-generator/backend/internal/middleware"
 	"qr-generator/backend/internal/models"
 	"qr-generator/backend/internal/shared"
+	"qr-generator/backend/internal/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -36,13 +39,15 @@ type CreatePaymentResponse struct {
 
 type SepayPaymentInfo struct {
 	Provider        string  `json:"provider"`
-	BankAccount     string  `json:"bank_account"`
-	BankName        string  `json:"bank_name"`
+	BankCode        string  `json:"bank_code"`
+	AccountNo       string  `json:"account_no"`
 	AccountName     string  `json:"account_name"`
 	Amount          float64 `json:"amount"`
 	Currency        string  `json:"currency"`
 	TransactionCode string  `json:"transaction_code"`
 	TransferContent string  `json:"transfer_content"`
+	QRContent       string  `json:"qr_content"`
+	QRImageURL      string  `json:"qr_image_url"`
 	ReturnURL       string  `json:"return_url"`
 	Enabled         bool    `json:"enabled"`
 }
@@ -82,6 +87,7 @@ func RegisterRoutes(rg *gin.RouterGroup, db *gorm.DB, cfg config.Config) {
 		payments.POST("/mock-success", h.MockSuccess)
 	}
 	payments.GET("/:transactionCode", h.Detail)
+	payments.POST("/:transactionCode/cancel", h.Cancel)
 	payments.GET("", h.List)
 	rg.POST("/subscriptions/upgrade", h.Create)
 }
@@ -264,30 +270,164 @@ func (h *Handler) Detail(c *gin.Context) {
 		shared.Error(c, 404, "Payment not found", nil)
 		return
 	}
+	if payment.Status == shared.PaymentStatusPending && h.cfg.SepayEnabled && h.cfg.SepayAPIURL != "" && h.cfg.SepayAPIKey != "" {
+		h.checkSepayTransaction(&payment)
+	}
 	shared.OK(c, "Success", CreatePaymentResponse{
 		Payment:      payment,
 		Instructions: h.sepayInfo(payment),
 	})
 }
 
+func (h *Handler) Cancel(c *gin.Context) {
+	user, _ := middleware.CurrentUser(c)
+	var payment models.Payment
+	if err := h.db.Where("transaction_code = ? AND user_id = ?", c.Param("transactionCode"), user.ID).First(&payment).Error; err != nil {
+		shared.Error(c, 404, "Payment not found", nil)
+		return
+	}
+	if payment.Status != shared.PaymentStatusPending {
+		shared.Error(c, 400, "Payment is not pending", nil)
+		return
+	}
+	payment.Status = shared.PaymentStatusCancelled
+	if err := h.db.Save(&payment).Error; err != nil {
+		shared.Error(c, 500, "Could not cancel payment", nil)
+		return
+	}
+	shared.OK(c, "Payment cancelled", CreatePaymentResponse{
+		Payment:      payment,
+		Instructions: h.sepayInfo(payment),
+	})
+}
+
+func (h *Handler) checkSepayTransaction(payment *models.Payment) {
+	// Sepay API v1: GET with query params
+	req, err := http.NewRequest("GET", h.cfg.SepayAPIURL, nil)
+	if err != nil {
+		return
+	}
+	q := req.URL.Query()
+	q.Set("account_number", h.cfg.AccountNo)
+	q.Set("from_date", payment.CreatedAt.Format("2006-01-02 15:04:05"))
+	q.Set("to_date", time.Now().Format("2006-01-02 15:04:05"))
+	q.Set("limit", "50")
+	req.URL.RawQuery = q.Encode()
+	req.Header.Set("Authorization", "Bearer "+h.cfg.SepayAPIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+
+	// Sepay API v1 response: status=200 (int), transactions=[...], transaction_content field
+	var result struct {
+		Status       int  `json:"status"`
+		Messages     struct{ Success bool `json:"success"` } `json:"messages"`
+		Transactions []struct {
+			TransactionContent string  `json:"transaction_content"`
+			AmountIn           float64 `json:"amount_in"`
+			AmountOut          float64 `json:"amount_out"`
+		} `json:"transactions"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return
+	}
+	// status=200 means OK, messages.success=true confirms success
+	if result.Status != 200 && !result.Messages.Success {
+		return
+	}
+
+	// Normalize transaction code: strip all non-alphanumeric for robust matching
+	// (banks may drop dashes/spaces from transfer content)
+	nonAlnum := regexp.MustCompile(`[^a-zA-Z0-9]`)
+	normalizedCode := nonAlnum.ReplaceAllString(
+		strings.ToUpper(strings.TrimSpace(payment.TransactionCode)), "")
+
+	for _, txn := range result.Transactions {
+		normalizedContent := strings.ToUpper(nonAlnum.ReplaceAllString(txn.TransactionContent, ""))
+		if strings.Contains(normalizedContent, normalizedCode) {
+			matchedAmount := txn.AmountIn
+			if matchedAmount <= 0 {
+				// outgoing? skip
+				continue
+			}
+			if math.Abs(matchedAmount-payment.Amount) <= 0.01 {
+				now := time.Now()
+				h.db.Transaction(func(tx *gorm.DB) error {
+					var locked models.Payment
+					if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", payment.ID).First(&locked).Error; err != nil {
+						return err
+					}
+					if locked.Status != shared.PaymentStatusPending {
+						return errPaymentNotPending
+					}
+					var pro models.Plan
+					if err := tx.Where("name = ? AND status = ?", shared.PlanNamePro, shared.PlanStatusActive).First(&pro).Error; err != nil {
+						return err
+					}
+					sub, err := h.createProSubscription(tx, locked.UserID, pro, now)
+					if err != nil {
+						return err
+					}
+					locked.Status = shared.PaymentStatusSuccess
+					locked.PaidAt = &now
+					locked.SubscriptionID = &sub.ID
+					locked.ProviderPayload = string(raw)
+					if err := tx.Save(&locked).Error; err != nil {
+						return err
+					}
+					*payment = locked
+					return nil
+				})
+				break
+			}
+		}
+	}
+}
+
 func (h *Handler) newTransactionCode(userID uint) string {
-	prefix := strings.TrimSpace(h.cfg.SepayPaymentPrefix)
+	prefix := strings.TrimSpace(h.cfg.SepayTransactionPrefix)
 	if prefix == "" {
 		prefix = "QRPRO"
 	}
-	return fmt.Sprintf("%s-%d-%s", prefix, userID, strings.ToUpper(uuid.NewString()[:8]))
+	// Sanitize prefix to allow only alphanumeric characters
+	reg := regexp.MustCompile("[^a-zA-Z0-9]")
+	prefix = reg.ReplaceAllString(prefix, "")
+
+	return fmt.Sprintf("%s%d%s", prefix, userID, strings.ToUpper(uuid.NewString()[:8]))
 }
 
 func (h *Handler) sepayInfo(payment models.Payment) SepayPaymentInfo {
+	qrContent := utils.VietQRContent(
+		h.cfg.BankCode,
+		h.cfg.AccountNo,
+		h.cfg.AccountName,
+		payment.TransactionCode,
+		payment.Amount,
+	)
+	qrImageURL := fmt.Sprintf("https://img.vietqr.io/image/%s-%s-qr_only.png?amount=%.0f&addInfo=%s&accountName=%s",
+		h.cfg.BankCode,
+		h.cfg.AccountNo,
+		payment.Amount,
+		url.QueryEscape(payment.TransactionCode),
+		url.QueryEscape(h.cfg.AccountName),
+	)
 	return SepayPaymentInfo{
 		Provider:        "SEPAY",
-		BankAccount:     h.cfg.SepayBankAccount,
-		BankName:        h.cfg.SepayBankName,
-		AccountName:     h.cfg.SepayAccountName,
+		BankCode:        h.cfg.BankCode,
+		AccountNo:       h.cfg.AccountNo,
+		AccountName:     h.cfg.AccountName,
 		Amount:          payment.Amount,
 		Currency:        payment.Currency,
 		TransactionCode: payment.TransactionCode,
 		TransferContent: payment.TransactionCode,
+		QRContent:       qrContent,
+		QRImageURL:      qrImageURL,
 		ReturnURL:       h.cfg.SepayReturnURL,
 		Enabled:         h.cfg.SepayEnabled,
 	}
@@ -343,7 +483,7 @@ func (h *Handler) validWebhookSecret(c *gin.Context, bodySecret string) bool {
 }
 
 func (h *Handler) extractTransactionCode(req SepayWebhookRequest) string {
-	prefix := h.cfg.SepayPaymentPrefix
+	prefix := h.cfg.SepayTransactionPrefix
 	if prefix == "" {
 		prefix = "QRPRO"
 	}

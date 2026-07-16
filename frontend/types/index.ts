@@ -84,13 +84,15 @@ export interface Payment {
 
 export interface PaymentInstructions {
   provider: string;
-  bank_account: string;
-  bank_name: string;
+  bank_code: string;
+  account_no: string;
   account_name: string;
   amount: number;
   currency: string;
   transaction_code: string;
   transfer_content: string;
+  qr_content: string;
+  qr_image_url: string;
   return_url: string;
   enabled: boolean;
 }

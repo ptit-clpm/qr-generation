@@ -47,14 +47,14 @@ Cau hinh Sepay trong `backend/.env`:
 
 ```env
 SEPAY_ENABLED=true
-SEPAY_WEBHOOK_SECRET=
-SEPAY_BANK_ACCOUNT=
-SEPAY_BANK_NAME=
-SEPAY_ACCOUNT_NAME=
-SEPAY_PAYMENT_PREFIX=QRPRO
+SEPAY_TRANSACTION_PREFIX=QRPRO
 SEPAY_RETURN_URL=http://localhost:3000/pricing
-SEPAY_API_BASE_URL=
-SEPAY_API_TOKEN=
+SEPAY_WEBHOOK_SECRET=
+SEPAY_API_URL=https://my.sepay.vn/userapi/transactions/list
+SEPAY_API_KEY=
+BANK_CODE=
+ACCOUNT_NO=
+ACCOUNT_NAME=
 ```
 
 Route `/payments/mock-success` chi duoc dang ky khi `APP_ENV=development` va `SEPAY_ENABLED=false`; frontend khong su dung route mock nay.

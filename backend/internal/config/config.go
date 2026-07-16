@@ -27,15 +27,15 @@ type Config struct {
 	FreeMaxQRCodes     int
 	AdminEmail         string
 	AdminPassword      string
-	SepayEnabled       bool
-	SepayWebhookSecret string
-	SepayBankAccount   string
-	SepayBankName      string
-	SepayAccountName   string
-	SepayPaymentPrefix string
-	SepayReturnURL     string
-	SepayAPIBaseURL    string
-	SepayAPIToken      string
+	SepayEnabled           bool
+	SepayWebhookSecret     string
+	SepayTransactionPrefix string
+	SepayReturnURL         string
+	SepayAPIURL            string
+	SepayAPIKey            string
+	BankCode               string
+	AccountNo              string
+	AccountName            string
 }
 
 func Load() Config {
@@ -59,15 +59,15 @@ func Load() Config {
 		FreeMaxQRCodes:     getEnvInt("FREE_MAX_QR_CODES", 10),
 		AdminEmail:         getEnv("ADMIN_EMAIL", "admin@qr.local"),
 		AdminPassword:      getEnv("ADMIN_PASSWORD", "Admin@123456"),
-		SepayEnabled:       getEnvBool("SEPAY_ENABLED", true),
-		SepayWebhookSecret: getEnv("SEPAY_WEBHOOK_SECRET", ""),
-		SepayBankAccount:   getEnv("SEPAY_BANK_ACCOUNT", ""),
-		SepayBankName:      getEnv("SEPAY_BANK_NAME", ""),
-		SepayAccountName:   getEnv("SEPAY_ACCOUNT_NAME", ""),
-		SepayPaymentPrefix: getEnv("SEPAY_PAYMENT_PREFIX", "QRPRO"),
-		SepayReturnURL:     getEnv("SEPAY_RETURN_URL", getEnv("FRONTEND_URL", "http://localhost:3000")+"/pricing"),
-		SepayAPIBaseURL:    getEnv("SEPAY_API_BASE_URL", ""),
-		SepayAPIToken:      getEnv("SEPAY_API_TOKEN", ""),
+		SepayEnabled:           getEnvBool("SEPAY_ENABLED", true),
+		SepayWebhookSecret:     getEnv("SEPAY_WEBHOOK_SECRET", ""),
+		SepayTransactionPrefix: getEnv("SEPAY_TRANSACTION_PREFIX", "QRPRO"),
+		SepayReturnURL:         getEnv("SEPAY_RETURN_URL", getEnv("FRONTEND_URL", "http://localhost:3000")+"/pricing"),
+		SepayAPIURL:            getEnv("SEPAY_API_URL", ""),
+		SepayAPIKey:            getEnv("SEPAY_API_KEY", ""),
+		BankCode:               getEnv("BANK_CODE", ""),
+		AccountNo:              getEnv("ACCOUNT_NO", ""),
+		AccountName:            getEnv("ACCOUNT_NAME", ""),
 	}
 }
 
