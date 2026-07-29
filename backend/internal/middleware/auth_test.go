@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"qr-generator/backend/internal/config"
 	"qr-generator/backend/internal/models"
@@ -95,7 +96,7 @@ func TestAuthRequired_TokenFromWrongSecret(t *testing.T) {
 	db := setupAuthTestDB(t)
 	cfg := config.Config{JWTAccessSecret: "actual-secret"}
 
-	wrongToken, _ := utils.GenerateToken(1, "user@test.com", []string{"USER"}, "wrong-secret", 3600)
+	wrongToken, _ := utils.GenerateToken(1, "user@test.com", []string{"USER"}, "wrong-secret", 3600 * time.Second)
 
 	r := gin.New()
 	r.GET("/protected", AuthRequired(db, cfg), func(c *gin.Context) {
@@ -135,7 +136,7 @@ func TestAuthRequired_UserNotFound(t *testing.T) {
 	db := setupAuthTestDB(t)
 	cfg := config.Config{JWTAccessSecret: "test-secret"}
 
-	token, _ := utils.GenerateToken(9999, "nonexistent@test.com", []string{"USER"}, "test-secret", 3600)
+	token, _ := utils.GenerateToken(9999, "nonexistent@test.com", []string{"USER"}, "test-secret", 3600 * time.Second)
 
 	r := gin.New()
 	r.GET("/protected", AuthRequired(db, cfg), func(c *gin.Context) {
@@ -156,7 +157,7 @@ func TestAuthRequired_UserIsLocked(t *testing.T) {
 	cfg := config.Config{JWTAccessSecret: "test-secret"}
 
 	user := seedUser(db, "Locked User", "locked@test.com", shared.UserStatusLocked, shared.RoleNameUser)
-	token, _ := utils.GenerateToken(user.ID, user.Email, []string{"USER"}, "test-secret", 3600)
+	token, _ := utils.GenerateToken(user.ID, user.Email, []string{"USER"}, "test-secret", 3600 * time.Second)
 
 	r := gin.New()
 	r.GET("/protected", AuthRequired(db, cfg), func(c *gin.Context) {
@@ -177,7 +178,7 @@ func TestAuthRequired_Success(t *testing.T) {
 	cfg := config.Config{JWTAccessSecret: "test-secret"}
 
 	user := seedUser(db, "Active User", "active@test.com", shared.UserStatusActive, shared.RoleNameUser)
-	token, _ := utils.GenerateToken(user.ID, user.Email, []string{"USER"}, "test-secret", 3600)
+	token, _ := utils.GenerateToken(user.ID, user.Email, []string{"USER"}, "test-secret", 3600 * time.Second)
 
 	r := gin.New()
 	r.GET("/protected", AuthRequired(db, cfg), func(c *gin.Context) {
@@ -202,7 +203,7 @@ func TestAdminRequired_NonAdmin(t *testing.T) {
 	cfg := config.Config{JWTAccessSecret: "test-secret"}
 
 	user := seedUser(db, "Regular User", "user@test.com", shared.UserStatusActive, shared.RoleNameUser)
-	token, _ := utils.GenerateToken(user.ID, user.Email, []string{"USER"}, "test-secret", 3600)
+	token, _ := utils.GenerateToken(user.ID, user.Email, []string{"USER"}, "test-secret", 3600 * time.Second)
 
 	r := gin.New()
 	r.GET("/admin", AuthRequired(db, cfg), AdminRequired(), func(c *gin.Context) {
@@ -223,7 +224,7 @@ func TestAdminRequired_AdminSuccess(t *testing.T) {
 	cfg := config.Config{JWTAccessSecret: "test-secret"}
 
 	user := seedUser(db, "Admin User", "admin@test.com", shared.UserStatusActive, shared.RoleNameAdmin, shared.RoleNameUser)
-	token, _ := utils.GenerateToken(user.ID, user.Email, []string{"ADMIN", "USER"}, "test-secret", 3600)
+	token, _ := utils.GenerateToken(user.ID, user.Email, []string{"ADMIN", "USER"}, "test-secret", 3600 * time.Second)
 
 	r := gin.New()
 	r.GET("/admin", AuthRequired(db, cfg), AdminRequired(), func(c *gin.Context) {

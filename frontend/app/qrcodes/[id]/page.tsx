@@ -25,6 +25,7 @@ export default function QRDetailPage() {
       const res = await api.put<ApiEnvelope<QRCode>>(`/qrcodes/${qr.id}`, {
         title: qr.title,
         destination_url: qr.destination_url,
+        folder_id: qr.folder_id,
         status: qr.status
       });
       setQr(res.data.data ?? qr);

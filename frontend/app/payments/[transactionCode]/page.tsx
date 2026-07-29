@@ -48,7 +48,7 @@ export default function PaymentPage() {
       stopPolling();
       stopCountdown();
       if (status === "SUCCESS") {
-        routerRef.current.push("/pricing");
+        useAuthStore.getState().loadMe().catch(() => {});
       }
     },
     [stopPolling, stopCountdown]
@@ -99,7 +99,6 @@ export default function PaymentPage() {
   }, [loadPayment]);
 
   // ─── Start polling once payment is loaded and PENDING ────────────────────
-  // Deps: only transaction_code — so this never reruns when status changes inside setPayment.
   useEffect(() => {
     if (!payment) return;
     if (payment.payment.status !== "PENDING") return;
@@ -116,11 +115,10 @@ export default function PaymentPage() {
         setPayment(newPayment);
 
         if (newPayment.payment.status !== "PENDING") {
-          // Stop interval first to avoid race with cleanup
           stopPolling();
           stopCountdown();
           if (newPayment.payment.status === "SUCCESS") {
-            routerRef.current.push("/pricing");
+            useAuthStore.getState().loadMe().catch(() => {});
           }
         }
       } catch {
@@ -224,57 +222,81 @@ export default function PaymentPage() {
       {error ? <p className="mt-4 rounded-md bg-coral/10 px-3 py-2 text-sm text-coral">{error}</p> : null}
 
       {payment ? (
-        <section className="mt-6 grid gap-6 lg:grid-cols-[360px_1fr]">
-          <div className="rounded-md border border-slate-200 bg-white p-6 shadow-soft">
-            <div className="mx-auto flex aspect-square max-w-xs items-center justify-center rounded-md border border-slate-200 bg-white p-4 relative overflow-hidden">
-              {payment.payment.status === "PENDING" ? (
-                <img
-                  src={payment.instructions.qr_image_url}
-                  alt="Mã VietQR"
-                  className="w-[240px] h-[240px] object-contain"
-                />
-              ) : (
-                <div className="flex flex-col items-center justify-center text-center p-4">
-                  <span className="text-4xl mb-2">⚠️</span>
-                  <p className="text-sm font-semibold text-muted">Mã QR đã hết hiệu lực</p>
-                </div>
-              )}
+        <>
+          {payment.payment.status === "SUCCESS" ? (
+            <div className="mt-6 rounded-md border border-teal/20 bg-teal/5 p-6 text-center shadow-soft">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-teal text-white">
+                <CheckCircle2 className="h-8 w-8" />
+              </div>
+              <h2 className="mt-3 text-2xl font-bold text-ink">Thanh toán thành công!</h2>
+              <p className="mt-2 text-sm text-muted">
+                Gói Pro của bạn đã được kích hoạt. Bây giờ bạn có thể tạo mã Dynamic QR, tải Logo, sử dụng Folder và xem Analytics không giới hạn.
+              </p>
+              <div className="mt-5 flex flex-wrap justify-center gap-3">
+                <Link href="/dashboard">
+                  <Button>Về Dashboard</Button>
+                </Link>
+                <Link href="/qrcodes">
+                  <Button tone="secondary">Tạo mã QR Pro ngay</Button>
+                </Link>
+              </div>
             </div>
-            {payment.payment.status === "PENDING" && timeLeft !== null && timeLeft > 0 ? (
-              <div className="mt-4 rounded-md bg-amber-500/10 border border-amber-500/20 p-3 text-center">
-                <p className="text-sm text-amber-800 font-medium">
-                  Thời gian thanh toán còn lại:{" "}
-                  <span className="font-mono text-base font-bold">
-                    {Math.floor(timeLeft / 60)}:
-                    {String(timeLeft % 60).padStart(2, "0")}
-                  </span>
-                </p>
-              </div>
-            ) : null}
-            {getStatusBadge(payment.payment.status)}
-            {!payment.instructions.enabled ? (
-              <p className="mt-3 rounded-md bg-coral/10 px-3 py-2 text-sm text-coral">Sepay đang tắt ở môi trường backend này.</p>
-            ) : null}
-          </div>
+          ) : null}
 
-          <div className="rounded-md border border-slate-200 bg-white p-6 shadow-soft">
-            <h2 className="text-xl font-bold text-ink">Thông tin chuyển khoản</h2>
-            <dl className="mt-5 grid gap-4 text-sm md:grid-cols-2">
-              <div><dt className="text-muted">Ngân hàng</dt><dd className="mt-1 font-semibold text-ink">{bankMap[payment.instructions.bank_code] || payment.instructions.bank_code || "Chưa cấu hình"}</dd></div>
-              <div><dt className="text-muted">Số tài khoản</dt><dd className="mt-1 font-semibold text-ink">{payment.instructions.account_no || "Chưa cấu hình"}</dd></div>
-              <div><dt className="text-muted">Chủ tài khoản</dt><dd className="mt-1 font-semibold text-ink">{payment.instructions.account_name || "Chưa cấu hình"}</dd></div>
-              <div><dt className="text-muted">Số tiền</dt><dd className="mt-1 font-semibold text-ink">{payment.instructions.amount.toLocaleString("vi-VN")} {payment.instructions.currency}</dd></div>
-              <div className="md:col-span-2">
-                <dt className="text-muted">Nội dung chuyển khoản</dt>
-                <dd className="mt-1 break-all rounded-md bg-panel px-3 py-2 font-mono text-base font-semibold text-ink">{payment.instructions.transfer_content}</dd>
+          <section className="mt-6 grid gap-6 lg:grid-cols-[360px_1fr]">
+            <div className="rounded-md border border-slate-200 bg-white p-6 shadow-soft">
+              <div className="mx-auto flex aspect-square max-w-xs items-center justify-center rounded-md border border-slate-200 bg-white p-4 relative overflow-hidden">
+                {payment.payment.status === "PENDING" ? (
+                  <img
+                    src={payment.instructions.qr_image_url}
+                    alt="Mã VietQR"
+                    className="w-[240px] h-[240px] object-contain"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center text-center p-4">
+                    <span className="text-4xl mb-2">{payment.payment.status === "SUCCESS" ? "🎉" : "⚠️"}</span>
+                    <p className="text-sm font-semibold text-muted">
+                      {payment.payment.status === "SUCCESS" ? "Thanh toán hoàn tất" : "Mã QR đã hết hiệu lực"}
+                    </p>
+                  </div>
+                )}
               </div>
-              <div className="md:col-span-2">
-                <dt className="text-muted">Mã giao dịch</dt>
-                <dd className="mt-1 break-all font-mono font-semibold text-ink">{payment.payment.transaction_code}</dd>
-              </div>
-            </dl>
-          </div>
-        </section>
+              {payment.payment.status === "PENDING" && timeLeft !== null && timeLeft > 0 ? (
+                <div className="mt-4 rounded-md bg-amber-500/10 border border-amber-500/20 p-3 text-center">
+                  <p className="text-sm text-amber-800 font-medium">
+                    Thời gian thanh toán còn lại:{" "}
+                    <span className="font-mono text-base font-bold">
+                      {Math.floor(timeLeft / 60)}:
+                      {String(timeLeft % 60).padStart(2, "0")}
+                    </span>
+                  </p>
+                </div>
+              ) : null}
+              {getStatusBadge(payment.payment.status)}
+              {!payment.instructions.enabled ? (
+                <p className="mt-3 rounded-md bg-coral/10 px-3 py-2 text-sm text-coral">Sepay đang tắt ở môi trường backend này.</p>
+              ) : null}
+            </div>
+
+            <div className="rounded-md border border-slate-200 bg-white p-6 shadow-soft">
+              <h2 className="text-xl font-bold text-ink">Thông tin chuyển khoản</h2>
+              <dl className="mt-5 grid gap-4 text-sm md:grid-cols-2">
+                <div><dt className="text-muted">Ngân hàng</dt><dd className="mt-1 font-semibold text-ink">{bankMap[payment.instructions.bank_code] || payment.instructions.bank_code || "Chưa cấu hình"}</dd></div>
+                <div><dt className="text-muted">Số tài khoản</dt><dd className="mt-1 font-semibold text-ink">{payment.instructions.account_no || "Chưa cấu hình"}</dd></div>
+                <div><dt className="text-muted">Chủ tài khoản</dt><dd className="mt-1 font-semibold text-ink">{payment.instructions.account_name || "Chưa cấu hình"}</dd></div>
+                <div><dt className="text-muted">Số tiền</dt><dd className="mt-1 font-semibold text-ink">{payment.instructions.amount.toLocaleString("vi-VN")} {payment.instructions.currency}</dd></div>
+                <div className="md:col-span-2">
+                  <dt className="text-muted">Nội dung chuyển khoản</dt>
+                  <dd className="mt-1 break-all rounded-md bg-panel px-3 py-2 font-mono text-base font-semibold text-ink">{payment.instructions.transfer_content}</dd>
+                </div>
+                <div className="md:col-span-2">
+                  <dt className="text-muted">Mã giao dịch</dt>
+                  <dd className="mt-1 break-all font-mono font-semibold text-ink">{payment.payment.transaction_code}</dd>
+                </div>
+              </dl>
+            </div>
+          </section>
+        </>
       ) : null}
     </DashboardShell>
   );

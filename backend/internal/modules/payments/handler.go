@@ -487,14 +487,18 @@ func (h *Handler) extractTransactionCode(req SepayWebhookRequest) string {
 	if prefix == "" {
 		prefix = "QRPRO"
 	}
+	nonAlnum := regexp.MustCompile(`[^a-zA-Z0-9]`)
+	cleanPrefix := nonAlnum.ReplaceAllString(strings.ToUpper(prefix), "")
+
 	for _, candidate := range []string{req.TransactionCode, req.Code} {
 		candidate = strings.TrimSpace(candidate)
-		if strings.HasPrefix(strings.ToUpper(candidate), strings.ToUpper(prefix)) {
+		if candidate != "" && strings.HasPrefix(strings.ToUpper(nonAlnum.ReplaceAllString(candidate, "")), cleanPrefix) {
 			return candidate
 		}
 	}
-	pattern := regexp.MustCompile(`(?i)` + regexp.QuoteMeta(prefix) + `[-_A-Z0-9]*`)
-	if match := pattern.FindString(req.Content + " " + req.Description); match != "" {
+	cleanContent := strings.ToUpper(nonAlnum.ReplaceAllString(req.Content+" "+req.Description, ""))
+	pattern := regexp.MustCompile(`(?i)` + regexp.QuoteMeta(cleanPrefix) + `[A-Z0-9]+`)
+	if match := pattern.FindString(cleanContent); match != "" {
 		return match
 	}
 	return ""

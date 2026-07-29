@@ -61,7 +61,9 @@ func (h *Handler) Update(c *gin.Context) {
 
 func (h *Handler) Delete(c *gin.Context) {
 	user, _ := middleware.CurrentUser(c)
-	res := h.db.Where("id = ? AND user_id = ?", c.Param("id"), user.ID).Delete(&models.Folder{})
+	folderID := c.Param("id")
+	h.db.Model(&models.QRCode{}).Where("folder_id = ? AND user_id = ?", folderID, user.ID).Update("folder_id", nil)
+	res := h.db.Where("id = ? AND user_id = ?", folderID, user.ID).Delete(&models.Folder{})
 	if res.RowsAffected == 0 {
 		shared.Error(c, 404, "Folder not found", nil)
 		return

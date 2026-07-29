@@ -121,6 +121,13 @@ func (h *Handler) List(c *gin.Context) {
 	if status := c.Query("status"); status != "" {
 		query = query.Where("status = ?", status)
 	}
+	if folderID := c.Query("folder_id"); folderID != "" {
+		if folderID == "null" || folderID == "0" || folderID == "uncategorized" {
+			query = query.Where("folder_id IS NULL")
+		} else {
+			query = query.Where("folder_id = ?", folderID)
+		}
+	}
 	var total int64
 	query.Model(&models.QRCode{}).Count(&total)
 	var items []models.QRCode
@@ -148,13 +155,16 @@ func (h *Handler) Update(c *gin.Context) {
 		shared.Error(c, 400, "Validation error", err.Error())
 		return
 	}
-	updates := map[string]any{"title": req.Title, "folder_id": req.FolderID}
+	updates := map[string]any{"title": req.Title}
+	if req.FolderID != nil {
+		updates["folder_id"] = req.FolderID
+	}
 	if req.Status != "" {
 		updates["status"] = req.Status
 	}
 	if qr.IsDynamic {
-		if req.DestinationURL != "" && !isValidURL(req.DestinationURL) {
-			shared.Error(c, 400, "destination_url must be a valid URL", nil)
+		if req.DestinationURL == "" || !isValidURL(req.DestinationURL) {
+			shared.Error(c, 400, "destination_url must be a valid non-empty URL for Dynamic QR", nil)
 			return
 		}
 		updates["destination_url"] = req.DestinationURL

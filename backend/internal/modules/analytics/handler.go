@@ -43,9 +43,9 @@ func (h *Handler) ByDate(c *gin.Context) {
 	}
 	var rows []row
 	h.db.Model(&models.QRScan{}).
-		Select("DATE(scanned_at) as label, COUNT(*) as count").
+		Select("DATE_FORMAT(scanned_at, '%Y-%m-%d') as label, COUNT(*) as count").
 		Where("qr_code_id = ?", qr.ID).
-		Group("DATE(scanned_at)").
+		Group("DATE_FORMAT(scanned_at, '%Y-%m-%d')").
 		Order("label asc").
 		Scan(&rows)
 	shared.OK(c, "Success", rows)

@@ -19,7 +19,7 @@ export default function AnalyticsPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api.get<ApiEnvelope<{ items: QRCode[] }>>("/qrcodes").then((res) => {
+    api.get<ApiEnvelope<{ items: QRCode[] }>>("/qrcodes", { params: { limit: 100 } }).then((res) => {
       const dynamic = (res.data.data?.items ?? []).filter((qr) => qr.is_dynamic);
       setQrs(dynamic);
       setQrId(dynamic[0]?.id ?? null);

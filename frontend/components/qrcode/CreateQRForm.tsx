@@ -1,24 +1,54 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download, Save } from "lucide-react";
 import { api, messageFromError } from "@/lib/api";
 import { backendUrl, qrTypes } from "@/lib/constants";
 import { Button } from "@/components/common/Button";
 import { QRPreview } from "@/components/qrcode/QRPreview";
+import { QRTypeFields } from "@/components/qrcode/QRTypeFields";
+import { useAuthStore } from "@/stores/auth";
 import type { ApiEnvelope, QRCode, QRType } from "@/types";
 
-export function CreateQRForm() {
+interface FolderItem {
+  id: number;
+  name: string;
+}
+
+interface CreateQRFormProps {
+  onSaved?: (qr: QRCode) => void;
+}
+
+export function CreateQRForm({ onSaved }: CreateQRFormProps) {
+  const { user } = useAuthStore();
+  const isProUser = user?.roles?.some((r) => r.name === "ADMIN") || false; // Or check active pro subscription
+
   const [title, setTitle] = useState("Campaign QR");
   const [qrType, setQrType] = useState<QRType>("URL");
   const [content, setContent] = useState("https://example.com");
   const [isDynamic, setDynamic] = useState(false);
   const [destinationUrl, setDestinationUrl] = useState("https://example.com");
+  const [folderId, setFolderId] = useState<number | null>(null);
+  const [folders, setFolders] = useState<FolderItem[]>([]);
   const [foreground, setForeground] = useState("#111827");
   const [background, setBackground] = useState("#FFFFFF");
   const [created, setCreated] = useState<QRCode | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Fetch folders if user is logged in
+  useEffect(() => {
+    if (user) {
+      api
+        .get<ApiEnvelope<FolderItem[]>>("/folders")
+        .then((res) => setFolders(res.data.data ?? []))
+        .catch(() => {});
+    }
+  }, [user]);
+
+  const handleContentChange = useCallback((newContent: string) => {
+    setContent(newContent);
+  }, []);
 
   const previewValue = useMemo(() => {
     if (created?.is_dynamic && created.short_code) return `${backendUrl}/q/${created.short_code}`;
@@ -35,9 +65,14 @@ export function CreateQRForm() {
         content,
         is_dynamic: isDynamic,
         destination_url: destinationUrl,
+        folder_id: folderId,
         design: { foreground_color: foreground, background_color: background, size: 512, error_correction_level: "M" }
       });
-      setCreated(res.data.data ?? null);
+      const newQr = res.data.data ?? null;
+      setCreated(newQr);
+      if (newQr) {
+        onSaved?.(newQr);
+      }
     } catch (err) {
       setError(messageFromError(err));
     } finally {
@@ -56,6 +91,8 @@ export function CreateQRForm() {
     URL.revokeObjectURL(url);
   }
 
+  const isLocalhostBackend = backendUrl.includes("localhost") || backendUrl.includes("127.0.0.1");
+
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_420px]">
       <section className="rounded-md border border-slate-200 bg-white p-5 shadow-soft">
@@ -67,43 +104,94 @@ export function CreateQRForm() {
           <label className="text-sm font-medium text-ink">
             Type
             <select value={qrType} onChange={(e) => setQrType(e.target.value as QRType)} className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2">
-              {qrTypes.map((type) => <option key={type.value} value={type.value}>{type.label}{type.pro ? " Pro" : ""}</option>)}
+              {qrTypes.map((type) => (
+                <option key={type.value} value={type.value}>
+                  {type.label}
+                  {type.pro ? " (Pro)" : ""}
+                </option>
+              ))}
             </select>
           </label>
-          <label className="md:col-span-2 text-sm font-medium text-ink">
-            Content
-            <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={5} className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2" />
-          </label>
-          <label className="flex items-center gap-2 text-sm font-medium text-ink">
-            <input type="checkbox" checked={isDynamic} onChange={(e) => setDynamic(e.target.checked)} />
-            Dynamic QR
-          </label>
-          {isDynamic ? (
+
+          {/* Dynamic field layout according to qrType */}
+          <QRTypeFields qrType={qrType} onChangeContent={handleContentChange} isProUser={isProUser} />
+
+          {/* Folder selection if logged in */}
+          {user ? (
             <label className="md:col-span-2 text-sm font-medium text-ink">
-              Destination URL
-              <input value={destinationUrl} onChange={(e) => setDestinationUrl(e.target.value)} className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2" />
+              Folder (Thư mục)
+              <select
+                value={folderId ?? ""}
+                onChange={(e) => setFolderId(e.target.value ? Number(e.target.value) : null)}
+                className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2"
+              >
+                <option value="">-- Uncategorized (Không chọn thư mục) --</option>
+                {folders.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
             </label>
           ) : null}
+
+          <label className="flex items-center gap-2 text-sm font-medium text-ink md:col-span-2">
+            <input type="checkbox" checked={isDynamic} onChange={(e) => setDynamic(e.target.checked)} />
+            Dynamic QR (Cho phép đếm scan và đổi URL đích về sau)
+          </label>
+
+          {isDynamic ? (
+            <label className="md:col-span-2 text-sm font-medium text-ink">
+              Destination URL (URL đích khi quét mã Dynamic)
+              <input
+                value={destinationUrl}
+                onChange={(e) => setDestinationUrl(e.target.value)}
+                placeholder="https://example.com"
+                className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2"
+              />
+            </label>
+          ) : null}
+
           <label className="text-sm font-medium text-ink">
-            Foreground
+            Foreground Color
             <input type="color" value={foreground} onChange={(e) => setForeground(e.target.value)} className="mt-1 h-10 w-full rounded-md border border-slate-200" />
           </label>
           <label className="text-sm font-medium text-ink">
-            Background
+            Background Color
             <input type="color" value={background} onChange={(e) => setBackground(e.target.value)} className="mt-1 h-10 w-full rounded-md border border-slate-200" />
           </label>
         </div>
+
         {error ? <p className="mt-4 rounded-md bg-coral/10 px-3 py-2 text-sm text-coral">{error}</p> : null}
         <div className="mt-5 flex flex-wrap gap-3">
-          <Button onClick={submit} disabled={loading}><Save className="h-4 w-4" />{loading ? "Saving" : "Save QR"}</Button>
-          {created ? <Button tone="secondary" onClick={download}><Download className="h-4 w-4" />Download</Button> : null}
+          <Button onClick={submit} disabled={loading}>
+            <Save className="h-4 w-4" />
+            {loading ? "Saving" : "Save QR"}
+          </Button>
+          {created ? (
+            <Button tone="secondary" onClick={download}>
+              <Download className="h-4 w-4" />
+              Download PNG
+            </Button>
+          ) : null}
         </div>
       </section>
+
       <section className="rounded-md border border-slate-200 bg-white p-5 shadow-soft">
         <h2 className="text-lg font-semibold text-ink">Preview</h2>
         <div className="mt-4 flex justify-center">
           <QRPreview value={previewValue} foreground={foreground} background={background} />
         </div>
+
+        {isDynamic && isLocalhostBackend ? (
+          <div className="mt-4 rounded-md bg-sky-500/10 border border-sky-500/20 p-3 text-xs text-sky-800">
+            <p className="font-semibold">💡 Lưu ý test quét bằng điện thoại:</p>
+            <p className="mt-1">
+              Mã Dynamic QR mã hóa đường dẫn <code className="font-mono">{backendUrl}/q/...</code>.
+              Vì URL hiện tại là <code className="font-mono">localhost</code>, điện thoại ngoài sẽ không mở được trừ khi bạn cấu hình <code className="font-mono">NEXT_PUBLIC_BACKEND_URL</code> thành IP LAN (ví dụ <code className="font-mono">http://192.168.x.x:8080</code>) hoặc Ngrok tunnel.
+            </p>
+          </div>
+        ) : null}
       </section>
     </div>
   );
