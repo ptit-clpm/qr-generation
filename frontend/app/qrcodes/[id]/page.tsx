@@ -24,9 +24,9 @@ export default function QRDetailPage() {
     try {
       const res = await api.put<ApiEnvelope<QRCode>>(`/qrcodes/${qr.id}`, {
         title: qr.title,
-        destination_url: qr.destination_url,
+        destination_url: qr.is_dynamic ? qr.destination_url : undefined,
         folder_id: qr.folder_id,
-        status: qr.status
+        status: qr.is_dynamic ? qr.status : undefined
       });
       setQr(res.data.data ?? qr);
       setMessage("QR updated");
@@ -48,13 +48,15 @@ export default function QRDetailPage() {
                 Title
                 <input value={qr.title} onChange={(e) => setQr({ ...qr, title: e.target.value })} className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2" />
               </label>
-              <label className="text-sm font-medium text-ink">
-                Status
-                <select value={qr.status} onChange={(e) => setQr({ ...qr, status: e.target.value as QRCode["status"] })} className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2">
-                  <option value="ACTIVE">ACTIVE</option>
-                  <option value="DISABLED">DISABLED</option>
-                </select>
-              </label>
+              {qr.is_dynamic ? (
+                <label className="text-sm font-medium text-ink">
+                  Status
+                  <select value={qr.status} onChange={(e) => setQr({ ...qr, status: e.target.value as QRCode["status"] })} className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2">
+                    <option value="ACTIVE">ACTIVE</option>
+                    <option value="DISABLED">DISABLED</option>
+                  </select>
+                </label>
+              ) : null}
               {qr.is_dynamic ? (
                 <label className="text-sm font-medium text-ink">
                   Destination URL

@@ -262,6 +262,16 @@ export function QRTypeFields({ qrType, onChangeContent, isProUser }: QRTypeField
               className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2"
             />
           </label>
+          <label className="text-sm font-medium text-ink sm:col-span-2">
+            Website URL
+            <input
+              type="url"
+              value={vWebsite}
+              onChange={(e) => setVWebsite(e.target.value)}
+              placeholder="https://example.com"
+              className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2"
+            />
+          </label>
         </div>
       );
 
@@ -350,16 +360,42 @@ export function QRTypeFields({ qrType, onChangeContent, isProUser }: QRTypeField
       );
 
     case "SOCIAL":
-    case "PDF":
-    case "MENU":
       return (
         <label className="md:col-span-2 text-sm font-medium text-ink">
-          {qrType} Target URL / Link
+          Social Profile URL
           <input
             type="url"
             value={proUrl}
             onChange={(e) => setProUrl(e.target.value)}
-            placeholder={`https://example.com/${qrType.toLowerCase()}`}
+            placeholder="https://instagram.com/yourprofile"
+            className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2"
+          />
+        </label>
+      );
+
+    case "PDF":
+      return (
+        <label className="md:col-span-2 text-sm font-medium text-ink">
+          PDF Document URL
+          <input
+            type="url"
+            value={proUrl}
+            onChange={(e) => setProUrl(e.target.value)}
+            placeholder="https://example.com/document.pdf"
+            className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2"
+          />
+        </label>
+      );
+
+    case "MENU":
+      return (
+        <label className="md:col-span-2 text-sm font-medium text-ink">
+          Menu URL
+          <input
+            type="url"
+            value={proUrl}
+            onChange={(e) => setProUrl(e.target.value)}
+            placeholder="https://example.com/menu"
             className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2"
           />
         </label>

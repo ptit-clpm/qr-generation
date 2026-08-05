@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,6 +64,31 @@ type SepayWebhookRequest struct {
 	TransferAmount  float64 `json:"transferAmount"`
 	Amount          float64 `json:"amount"`
 	Status          string  `json:"status"`
+}
+
+// sepayAmount accepts both numeric JSON values and quoted numeric values.
+// The legacy SePay transactions API documents amount_in/amount_out as strings.
+type sepayAmount float64
+
+func (a *sepayAmount) UnmarshalJSON(data []byte) error {
+	raw := strings.TrimSpace(string(data))
+	if raw == "" || raw == "null" {
+		*a = 0
+		return nil
+	}
+	if strings.HasPrefix(raw, "\"") {
+		var value string
+		if err := json.Unmarshal(data, &value); err != nil {
+			return err
+		}
+		raw = strings.TrimSpace(value)
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return fmt.Errorf("invalid SePay amount %q: %w", raw, err)
+	}
+	*a = sepayAmount(value)
+	return nil
 }
 
 type MockSuccessRequest struct {
@@ -309,8 +335,15 @@ func (h *Handler) checkSepayTransaction(payment *models.Payment) {
 	}
 	q := req.URL.Query()
 	q.Set("account_number", h.cfg.AccountNo)
-	q.Set("from_date", payment.CreatedAt.Format("2006-01-02 15:04:05"))
-	q.Set("to_date", time.Now().Format("2006-01-02 15:04:05"))
+	if strings.Contains(strings.ToLower(h.cfg.SepayAPIURL), "/userapi/transactions/list") {
+		q.Set("transaction_date_min", payment.CreatedAt.Format("2006-01-02"))
+		// The legacy API treats a date-only maximum as the start of that day.
+		// Use tomorrow so transactions later today are included.
+		q.Set("transaction_date_max", time.Now().AddDate(0, 0, 1).Format("2006-01-02"))
+	} else {
+		q.Set("from_date", payment.CreatedAt.Format("2006-01-02"))
+		q.Set("to_date", time.Now().Format("2006-01-02"))
+	}
 	q.Set("limit", "50")
 	req.URL.RawQuery = q.Encode()
 	req.Header.Set("Authorization", "Bearer "+h.cfg.SepayAPIKey)
@@ -326,19 +359,22 @@ func (h *Handler) checkSepayTransaction(payment *models.Payment) {
 
 	// Sepay API v1 response: status=200 (int), transactions=[...], transaction_content field
 	var result struct {
-		Status       int  `json:"status"`
-		Messages     struct{ Success bool `json:"success"` } `json:"messages"`
+		Status   int `json:"status"`
+		Messages struct {
+			Success bool `json:"success"`
+		} `json:"messages"`
 		Transactions []struct {
-			TransactionContent string  `json:"transaction_content"`
-			AmountIn           float64 `json:"amount_in"`
-			AmountOut          float64 `json:"amount_out"`
+			TransactionContent string      `json:"transaction_content"`
+			Code               string      `json:"code"`
+			AmountIn           sepayAmount `json:"amount_in"`
+			AmountOut          sepayAmount `json:"amount_out"`
 		} `json:"transactions"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return
 	}
 	// status=200 means OK, messages.success=true confirms success
-	if result.Status != 200 && !result.Messages.Success {
+	if result.Status != 200 || !result.Messages.Success {
 		return
 	}
 
@@ -350,15 +386,16 @@ func (h *Handler) checkSepayTransaction(payment *models.Payment) {
 
 	for _, txn := range result.Transactions {
 		normalizedContent := strings.ToUpper(nonAlnum.ReplaceAllString(txn.TransactionContent, ""))
-		if strings.Contains(normalizedContent, normalizedCode) {
-			matchedAmount := txn.AmountIn
+		normalizedTxnCode := strings.ToUpper(nonAlnum.ReplaceAllString(txn.Code, ""))
+		if strings.Contains(normalizedContent, normalizedCode) || strings.Contains(normalizedTxnCode, normalizedCode) {
+			matchedAmount := float64(txn.AmountIn)
 			if matchedAmount <= 0 {
 				// outgoing? skip
 				continue
 			}
 			if math.Abs(matchedAmount-payment.Amount) <= 0.01 {
 				now := time.Now()
-				h.db.Transaction(func(tx *gorm.DB) error {
+				err := h.db.Transaction(func(tx *gorm.DB) error {
 					var locked models.Payment
 					if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", payment.ID).First(&locked).Error; err != nil {
 						return err
@@ -384,7 +421,9 @@ func (h *Handler) checkSepayTransaction(payment *models.Payment) {
 					*payment = locked
 					return nil
 				})
-				break
+				if err == nil {
+					break
+				}
 			}
 		}
 	}
@@ -462,6 +501,9 @@ func (h *Handler) createProSubscription(tx *gorm.DB, userID uint, pro models.Pla
 func (h *Handler) validWebhookSecret(c *gin.Context, bodySecret string) bool {
 	expected := strings.TrimSpace(h.cfg.SepayWebhookSecret)
 	if expected == "" {
+		if h.cfg.AppEnv == "development" {
+			return true
+		}
 		return false
 	}
 	candidates := []string{
@@ -470,8 +512,14 @@ func (h *Handler) validWebhookSecret(c *gin.Context, bodySecret string) bool {
 		c.GetHeader("X-Webhook-Secret"),
 		bodySecret,
 	}
-	if auth := c.GetHeader("Authorization"); strings.HasPrefix(strings.ToLower(auth), "bearer ") {
-		candidates = append(candidates, strings.TrimSpace(auth[7:]))
+	if auth := c.GetHeader("Authorization"); auth != "" {
+		lowerAuth := strings.ToLower(auth)
+		for _, prefix := range []string{"bearer ", "apikey "} {
+			if strings.HasPrefix(lowerAuth, prefix) {
+				candidates = append(candidates, strings.TrimSpace(auth[len(prefix):]))
+				break
+			}
+		}
 	}
 	for _, candidate := range candidates {
 		candidate = strings.TrimSpace(candidate)

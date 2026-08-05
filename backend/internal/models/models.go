@@ -14,8 +14,9 @@ type User struct {
 	PhoneNumber  string            `gorm:"size:30" json:"phone_number"`
 	AvatarURL    string            `gorm:"size:255" json:"avatar_url"`
 	Status       shared.UserStatus `gorm:"size:20;not null;default:ACTIVE" json:"status"`
-	Roles        []Role            `gorm:"many2many:user_roles;" json:"roles,omitempty"`
-	CreatedAt    time.Time         `json:"created_at"`
+	Roles         []Role            `gorm:"many2many:user_roles;" json:"roles,omitempty"`
+	Subscriptions []Subscription    `gorm:"foreignKey:UserID" json:"subscriptions,omitempty"`
+	CreatedAt     time.Time         `json:"created_at"`
 	UpdatedAt    time.Time         `json:"updated_at"`
 }
 

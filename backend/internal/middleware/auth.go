@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"strings"
+	"time"
 
 	"qr-generator/backend/internal/config"
 	"qr-generator/backend/internal/models"
@@ -29,7 +30,10 @@ func AuthRequired(db *gorm.DB, cfg config.Config) gin.HandlerFunc {
 			return
 		}
 		var user models.User
-		if err := db.Preload("Roles").First(&user, claims.UserID).Error; err != nil || user.Status != shared.UserStatusActive {
+		if err := db.Preload("Roles").
+			Preload("Subscriptions", "status = ? AND end_date > ?", shared.SubscriptionStatusActive, time.Now()).
+			Preload("Subscriptions.Plan").
+			First(&user, claims.UserID).Error; err != nil || user.Status != shared.UserStatusActive {
 			shared.Error(c, 401, "User is not active", nil)
 			c.Abort()
 			return

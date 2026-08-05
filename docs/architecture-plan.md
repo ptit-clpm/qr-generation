@@ -6,13 +6,20 @@ QR Generator - QR Studio là website client-server cho phép tạo, tùy chỉnh
 
 Nhóm chức năng chính:
 - Auth và account: đăng ký, đăng nhập, đăng xuất, đổi mật khẩu, cập nhật hồ sơ, khóa tài khoản.
-- QR generation: URL, TEXT, WIFI là Must; VCARD là Should; EMAIL/SMS/LOCATION là Should; SOCIAL/PDF/MENU là Could/Pro.
+- QR generation: URL, TEXT, WIFI là Must; VCARD là Should; EMAIL/SMS/LOCATION là Should; SOCIAL/PDF/MENU là Could/Pro (Static URL category).
 - QR design: màu sắc, kích thước, template; logo, eye style, dot style nâng cao cho Pro.
 - QR management: lưu, danh sách, tìm kiếm/lọc, chi tiết, xóa mềm, download, duplicate.
-- Dynamic QR: Pro-only, short code, sửa URL đích, redirect, ghi nhận scan.
-- Analytics: tổng lượt quét, theo ngày, thiết bị, trình duyệt, hệ điều hành, vị trí tương đối.
-- Subscription/payment: Free mặc định, Pro qua payment mock trong MVP, SUCCESS mới kích hoạt.
+- Dynamic QR: Chỉ hỗ trợ cho QR type `URL`. Bật Dynamic cho các loại QR khác bị từ chối với HTTP 400.
+- Analytics: Chỉ dành cho Pro active. Thống kê tổng lượt quét (total HTTP redirect requests), theo ngày, thiết bị, trình duyệt. Trả về mảng rỗng nếu chưa có thông tin vị trí.
+- Subscription/payment: Free mặc định, Pro qua Sepay transfer/webhook.
 - Admin: dashboard, quản lý user, QR, plan, payment, template, log.
+
+## 1.1 Quy tắc nghiệp vụ bổ sung (Rules & Clarifications)
+1. **Dynamic QR scope**: Dynamic QR chỉ áp dụng duy nhất cho QR type `URL`. Khi `is_dynamic = true`, hệ thống tạo `short_code` và redirect `/q/:shortCode`. Các QR type `SOCIAL`, `PDF`, `MENU`, `WIFI`, `VCARD`, `EMAIL`, `SMS`, `LOCATION` bắt buộc là Static QR (`is_dynamic = false`).
+2. **Social / PDF / Menu**: Trong MVP, `SOCIAL`, `PDF`, và `MENU` là các loại QR tĩnh lưu URL trực tiếp (profile URL, document URL, menu online URL). Không tạo `short_code`, không đếm scan.
+3. **Phân biệt PDF QR & PDF Export**: QR type `PDF` là QR mã hóa đường dẫn tới file PDF. Quyền `allow_svg_pdf_export` là tính năng xuất ảnh QR thành định dạng PDF.
+4. **Scan Metrics**: `scan_count` và các biểu đồ thống kê ghi nhận **Tổng lượt redirect** (`Total Scans`), không phải số lượng người dùng duy nhất (Unique Visitors).
+5. **Quyền Pro Analytics**: Chỉ user sở hữu mã QR và có Subscription Pro đang ACTIVE (`end_date > NOW()`, `allow_analytics = true`) mới có thể truy cập `/qrcodes/:id/analytics/*`.
 
 ## 2. Assumptions
 

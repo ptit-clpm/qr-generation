@@ -21,7 +21,7 @@ import (
 func setupAuthTestDB(t *testing.T) *gorm.DB {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Role{}))
+	require.NoError(t, db.AutoMigrate(&models.User{}, &models.Role{}, &models.Plan{}, &models.Subscription{}))
 	db.Create(&models.Role{Name: shared.RoleNameUser})
 	db.Create(&models.Role{Name: shared.RoleNameAdmin})
 	return db

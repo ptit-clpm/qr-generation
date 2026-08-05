@@ -7,26 +7,29 @@ import { PublicHeader } from "@/components/layout/PublicHeader";
 import { DashboardShell } from "@/components/layout/DashboardShell";
 import { Button } from "@/components/common/Button";
 import { api, messageFromError } from "@/lib/api";
+import { useAuthStore } from "@/stores/auth";
 import type { ApiEnvelope, CreatePaymentResponse, Plan, PlanName, Subscription } from "@/types";
 
 export default function PricingPage() {
   const router = useRouter();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [creatingPlanId, setCreatingPlanId] = useState<number | null>(null);
-  const [authed, setAuthed] = useState(false);
+  const user = useAuthStore((state) => state.user);
+  const loadMe = useAuthStore((state) => state.loadMe);
   const [currentPlan, setCurrentPlan] = useState<PlanName>("FREE");
   const [error, setError] = useState("");
+  const authed = Boolean(user) || currentPlan === "PRO";
 
   useEffect(() => {
     const hasToken = Boolean(localStorage.getItem("access_token"));
-    setAuthed(hasToken);
     api.get<ApiEnvelope<Plan[]>>("/plans").then((res) => setPlans(res.data.data ?? [])).catch((err) => setError(messageFromError(err)));
     if (hasToken) {
+      loadMe().catch(() => {});
       api.get<ApiEnvelope<Subscription>>("/users/subscription")
         .then((res) => setCurrentPlan(res.data.data?.plan?.name ?? "FREE"))
         .catch(() => setCurrentPlan("FREE"));
     }
-  }, []);
+  }, [loadMe]);
 
   async function choose(plan: Plan) {
     setError("");
@@ -68,26 +71,42 @@ export default function PricingPage() {
               <p className="text-2xl font-bold text-teal">{plan.price.toLocaleString("vi-VN")}đ</p>
             </div>
             <ul className="mt-6 space-y-3 text-sm text-muted">
-              {[
-                `${plan.max_qr_codes} stored QR codes`,
-                plan.allow_dynamic_qr ? "Dynamic QR" : "Static QR",
-                plan.allow_logo ? "Logo support" : "Basic design",
-                plan.allow_analytics ? "Analytics" : "PNG download"
-              ].map((item) => (
-                <li key={item} className="flex items-center gap-2"><Check className="h-4 w-4 text-teal" />{item}</li>
+              {(plan.name === "PRO"
+                ? [
+                    `Tối đa ${plan.max_qr_codes} mã QR`,
+                    "Dynamic QR (áp dụng cho URL)",
+                    "Scan Analytics chi tiết (lượt quét, thiết bị, trình duyệt)",
+                    "Hỗ trợ tải lên Logo custom",
+                    "Danh mục URL nâng cao (Social profile, PDF link, Menu online)",
+                    "Tải mã QR định dạng PNG"
+                  ]
+                : [
+                    `Tối đa ${plan.max_qr_codes} mã QR`,
+                    "Static QR (mã hóa dữ liệu cố định)",
+                    "Các loại QR cơ bản: URL, Text, WiFi, vCard, Email, SMS, Location",
+                    "Tải mã QR định dạng PNG",
+                    "Thiết kế cơ bản (màu sắc, khung)"
+                  ]
+              ).map((item) => (
+                <li key={item} className="flex items-center gap-2">
+                  <Check className="h-4 w-4 text-teal flex-shrink-0" />
+                  <span>{item}</span>
+                </li>
               ))}
             </ul>
             <Button
               className="mt-6 w-full"
-              tone={plan.name === currentPlan ? "secondary" : "primary"}
+              tone={plan.name === currentPlan || (plan.name === "FREE" && currentPlan === "PRO") ? "secondary" : "primary"}
               onClick={() => choose(plan)}
-              disabled={creatingPlanId === plan.id || plan.name === currentPlan || (!authed && plan.name === "FREE")}
+              disabled={creatingPlanId === plan.id || plan.name === currentPlan || (plan.name === "FREE" && currentPlan === "PRO") || (!user && plan.name === "FREE")}
             >
-              {plan.name === currentPlan ? <Check className="h-4 w-4" /> : authed ? <CreditCard className="h-4 w-4" /> : <LockKeyhole className="h-4 w-4" />}
+              {plan.name === currentPlan ? <Check className="h-4 w-4" /> : plan.name === "FREE" && currentPlan === "PRO" ? <LockKeyhole className="h-4 w-4" /> : user ? <CreditCard className="h-4 w-4" /> : <LockKeyhole className="h-4 w-4" />}
               {plan.name === currentPlan
                 ? "Gói hiện tại của bạn"
                 : creatingPlanId === plan.id
                   ? "Đang tạo thanh toán"
+                  : currentPlan === "PRO" && plan.name === "FREE"
+                    ? "Không thể hạ xuống Free"
                   : plan.name === "PRO"
                     ? "Nâng cấp lên Pro"
                     : "Đăng nhập để dùng Free"}

@@ -134,7 +134,7 @@ export default function QRCodesPage() {
                       {qr.title}
                     </Link>
                     <p className="mt-1 text-sm text-muted">
-                      {qr.qr_type} · {qr.status} · {qr.scan_count} scans
+                      {qr.qr_type} · {qr.is_dynamic ? `${qr.status} · ` : ""}{qr.scan_count} scans
                     </p>
                     {folderName ? (
                       <p className="mt-1 flex items-center gap-1 text-xs text-teal font-medium">

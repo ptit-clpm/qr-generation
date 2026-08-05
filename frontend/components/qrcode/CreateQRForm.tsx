@@ -8,7 +8,7 @@ import { Button } from "@/components/common/Button";
 import { QRPreview } from "@/components/qrcode/QRPreview";
 import { QRTypeFields } from "@/components/qrcode/QRTypeFields";
 import { useAuthStore } from "@/stores/auth";
-import type { ApiEnvelope, QRCode, QRType } from "@/types";
+import type { ApiEnvelope, QRCode, QRType, Subscription } from "@/types";
 
 interface FolderItem {
   id: number;
@@ -21,7 +21,8 @@ interface CreateQRFormProps {
 
 export function CreateQRForm({ onSaved }: CreateQRFormProps) {
   const { user } = useAuthStore();
-  const isProUser = user?.roles?.some((r) => r.name === "ADMIN") || false; // Or check active pro subscription
+  const [hasProSubscription, setHasProSubscription] = useState(false);
+  const isProUser = user?.roles?.some((r) => r.name === "ADMIN") || hasProSubscription;
 
   const [title, setTitle] = useState("Campaign QR");
   const [qrType, setQrType] = useState<QRType>("URL");
@@ -35,6 +36,30 @@ export function CreateQRForm({ onSaved }: CreateQRFormProps) {
   const [created, setCreated] = useState<QRCode | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!user) {
+      setHasProSubscription(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    api
+      .get<ApiEnvelope<Subscription>>("/users/subscription")
+      .then((res) => {
+        if (cancelled) return;
+        setHasProSubscription(res.data.data?.plan?.name === "PRO");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setHasProSubscription(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   // Fetch folders if user is logged in
   useEffect(() => {
@@ -52,19 +77,20 @@ export function CreateQRForm({ onSaved }: CreateQRFormProps) {
 
   const previewValue = useMemo(() => {
     if (created?.is_dynamic && created.short_code) return `${backendUrl}/q/${created.short_code}`;
-    return isDynamic ? `${backendUrl}/q/preview` : content;
-  }, [created, content, isDynamic]);
+    return qrType === "URL" && isDynamic ? `${backendUrl}/q/preview` : content;
+  }, [created, content, isDynamic, qrType]);
 
   async function submit() {
     setLoading(true);
     setError("");
     try {
+      const isDynamicUrl = qrType === "URL" && isDynamic;
       const res = await api.post<ApiEnvelope<QRCode>>("/qrcodes", {
         title,
         qr_type: qrType,
         content,
-        is_dynamic: isDynamic,
-        destination_url: destinationUrl,
+        is_dynamic: isDynamicUrl,
+        destination_url: isDynamicUrl ? destinationUrl : undefined,
         folder_id: folderId,
         design: { foreground_color: foreground, background_color: background, size: 512, error_correction_level: "M" }
       });
@@ -103,7 +129,18 @@ export function CreateQRForm({ onSaved }: CreateQRFormProps) {
           </label>
           <label className="text-sm font-medium text-ink">
             Type
-            <select value={qrType} onChange={(e) => setQrType(e.target.value as QRType)} className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2">
+            <select
+              value={qrType}
+              onChange={(e) => {
+                const nextType = e.target.value as QRType;
+                setQrType(nextType);
+                if (nextType !== "URL") {
+                  setDynamic(false);
+                  setDestinationUrl("");
+                }
+              }}
+              className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2"
+            >
               {qrTypes.map((type) => (
                 <option key={type.value} value={type.value}>
                   {type.label}
@@ -135,21 +172,25 @@ export function CreateQRForm({ onSaved }: CreateQRFormProps) {
             </label>
           ) : null}
 
-          <label className="flex items-center gap-2 text-sm font-medium text-ink md:col-span-2">
-            <input type="checkbox" checked={isDynamic} onChange={(e) => setDynamic(e.target.checked)} />
-            Dynamic QR (Cho phép đếm scan và đổi URL đích về sau)
-          </label>
+          {qrType === "URL" ? (
+            <>
+              <label className="flex items-center gap-2 text-sm font-medium text-ink md:col-span-2">
+                <input type="checkbox" checked={isDynamic} onChange={(e) => setDynamic(e.target.checked)} />
+                Dynamic QR (Cho phép đếm scan và đổi URL đích về sau)
+              </label>
 
-          {isDynamic ? (
-            <label className="md:col-span-2 text-sm font-medium text-ink">
-              Destination URL (URL đích khi quét mã Dynamic)
-              <input
-                value={destinationUrl}
-                onChange={(e) => setDestinationUrl(e.target.value)}
-                placeholder="https://example.com"
-                className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2"
-              />
-            </label>
+              {isDynamic ? (
+                <label className="md:col-span-2 text-sm font-medium text-ink">
+                  Destination URL (URL đích khi quét mã Dynamic)
+                  <input
+                    value={destinationUrl}
+                    onChange={(e) => setDestinationUrl(e.target.value)}
+                    placeholder="https://example.com"
+                    className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2"
+                  />
+                </label>
+              ) : null}
+            </>
           ) : null}
 
           <label className="text-sm font-medium text-ink">

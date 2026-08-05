@@ -1,6 +1,8 @@
 package users
 
 import (
+	"time"
+
 	"qr-generator/backend/internal/middleware"
 	"qr-generator/backend/internal/models"
 	"qr-generator/backend/internal/shared"
@@ -50,12 +52,25 @@ func (h *Handler) UpdateProfile(c *gin.Context) {
 
 func (h *Handler) Subscription(c *gin.Context) {
 	user, _ := middleware.CurrentUser(c)
-	var sub models.Subscription
-	if err := h.db.Preload("Plan").Where("user_id = ? AND status = ?", user.ID, shared.SubscriptionStatusActive).Order("end_date desc").First(&sub).Error; err != nil {
+	var subs []models.Subscription
+	if err := h.db.Preload("Plan").
+		Where("user_id = ? AND status = ? AND end_date > ?", user.ID, shared.SubscriptionStatusActive, time.Now()).
+		Order("end_date desc").
+		Find(&subs).Error; err != nil {
 		shared.Error(c, 404, "Subscription not found", nil)
 		return
 	}
-	shared.OK(c, "Success", sub)
+	for _, sub := range subs {
+		if sub.Plan.Name == shared.PlanNamePro {
+			shared.OK(c, "Success", sub)
+			return
+		}
+	}
+	if len(subs) > 0 {
+		shared.OK(c, "Success", subs[0])
+		return
+	}
+	shared.Error(c, 404, "Subscription not found", nil)
 }
 
 func (h *Handler) Payments(c *gin.Context) {

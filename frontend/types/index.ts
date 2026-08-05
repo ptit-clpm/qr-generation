@@ -19,6 +19,7 @@ export interface User {
   avatar_url?: string;
   status: "ACTIVE" | "LOCKED" | "DELETED";
   roles?: Role[];
+  subscriptions?: Subscription[];
 }
 
 export interface Plan {
@@ -55,6 +56,7 @@ export interface QRDesign {
 
 export interface QRCode {
   id: number;
+  folder_id?: number | null;
   title: string;
   qr_type: QRType;
   content: string;

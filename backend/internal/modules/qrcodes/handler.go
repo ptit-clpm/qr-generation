@@ -51,6 +51,10 @@ func (h *Handler) Create(c *gin.Context) {
 		shared.Error(c, 400, "Validation error", err.Error())
 		return
 	}
+	if req.IsDynamic && req.QRType != shared.QRTypeURL {
+		shared.Error(c, 400, "Dynamic QR chỉ hỗ trợ QR type URL", nil)
+		return
+	}
 	if err := h.validateQRInput(req.QRType, req.Content); err != nil {
 		shared.Error(c, 400, err.Error(), nil)
 		return
@@ -75,7 +79,7 @@ func (h *Handler) Create(c *gin.Context) {
 
 	qr := models.QRCode{
 		UserID: user.ID, FolderID: req.FolderID, Title: req.Title, QRType: req.QRType,
-		Content: req.Content, IsDynamic: req.IsDynamic, DestinationURL: req.DestinationURL,
+		Content: req.Content, IsDynamic: req.IsDynamic, DestinationURL: "",
 		Status: shared.QRStatusActive,
 	}
 	if req.IsDynamic {
@@ -87,6 +91,7 @@ func (h *Handler) Create(c *gin.Context) {
 			shared.Error(c, 400, "destination_url must be a valid URL", nil)
 			return
 		}
+		qr.DestinationURL = req.DestinationURL
 		shortCode := utils.GenerateShortCode()
 		qr.ShortCode = &shortCode
 		qr.Content = utils.DynamicURL(h.cfg.AppURL, shortCode)
@@ -162,15 +167,21 @@ func (h *Handler) Update(c *gin.Context) {
 	if req.Status != "" {
 		updates["status"] = req.Status
 	}
-	if qr.IsDynamic {
+	if qr.IsDynamic && qr.QRType == shared.QRTypeURL {
 		if req.DestinationURL == "" || !isValidURL(req.DestinationURL) {
 			shared.Error(c, 400, "destination_url must be a valid non-empty URL for Dynamic QR", nil)
 			return
 		}
 		updates["destination_url"] = req.DestinationURL
-	} else if req.Content != "" && req.Content != qr.Content {
-		shared.Error(c, 400, "Static QR content cannot be changed after creation", nil)
-		return
+	} else {
+		if req.DestinationURL != "" && req.DestinationURL != qr.DestinationURL {
+			shared.Error(c, 400, "Dynamic QR chỉ hỗ trợ QR type URL", nil)
+			return
+		}
+		if req.Content != "" && req.Content != qr.Content {
+			shared.Error(c, 400, "Static QR content cannot be changed after creation", nil)
+			return
+		}
 	}
 	h.db.Model(&qr).Updates(updates)
 	h.db.Preload("Design").First(&qr, qr.ID)
@@ -270,7 +281,7 @@ func (h *Handler) UpdateDesign(c *gin.Context) {
 
 func (h *Handler) Redirect(c *gin.Context) {
 	var qr models.QRCode
-	if err := h.db.Where("short_code = ? AND is_dynamic = ?", c.Param("shortCode"), true).First(&qr).Error; err != nil {
+	if err := h.db.Where("short_code = ? AND is_dynamic = ? AND qr_type = ?", c.Param("shortCode"), true, shared.QRTypeURL).First(&qr).Error; err != nil {
 		c.String(404, "QR code not found")
 		return
 	}
@@ -284,8 +295,16 @@ func (h *Handler) Redirect(c *gin.Context) {
 		Browser: parseBrowser(c.Request.UserAgent()), OperatingSystem: parseOS(c.Request.UserAgent()),
 		Referer: c.GetHeader("Referer"),
 	}
-	h.db.Create(&scan)
-	h.db.Model(&qr).UpdateColumn("scan_count", gorm.Expr("scan_count + ?", 1))
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&scan).Error; err != nil {
+			return err
+		}
+		return tx.Model(&qr).UpdateColumn("scan_count", gorm.Expr("scan_count + ?", 1)).Error
+	})
+	if err != nil {
+		c.String(500, "Could not record scan")
+		return
+	}
 	c.Redirect(http.StatusFound, qr.DestinationURL)
 }
 
@@ -325,8 +344,11 @@ func (h *Handler) countUserQRCodes(userID uint) int64 {
 }
 
 func (h *Handler) validateQRInput(qrType shared.QRType, content string) error {
-	if qrType == shared.QRTypeURL && !isValidURL(content) {
-		return errString("content must be a valid URL")
+	switch qrType {
+	case shared.QRTypeURL, shared.QRTypeSocial, shared.QRTypePDF, shared.QRTypeMenu:
+		if !isValidURL(content) {
+			return errString("content must be a valid URL")
+		}
 	}
 	return nil
 }

@@ -11,3 +11,7 @@ frontend/.turbo/
 .gocache/
 .pnpm-store/
 .agents/
+.gocache/
+.gocache-*/
+**/.gocache/
+**/.gocache-*/

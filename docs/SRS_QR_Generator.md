@@ -814,6 +814,10 @@ Luồng ngoại lệ: Admin không được xem mật khẩu dạng gốc của 
 | BR-13  | Thanh toán SUCCESS mới kích hoạt hoặc gia hạn gói Pro.                         |
 | BR-14  | Khi gói Pro hết hạn, người dùng quay về giới hạn của gói Free.                 |
 | BR-15  | Admin có quyền vô hiệu hóa QR hoặc khóa tài khoản vi phạm.                     |
+| BR-16  | Dynamic QR chỉ áp dụng cho QR type URL. Các type khác (Social, PDF, Menu, WiFi, vCard...) phải là Static QR. |
+| BR-17  | QR type Social/PDF/Menu trong MVP là Static QR trỏ tới URL tương ứng (Profile, Document, Menu), không có short_code hay đếm scan. |
+| BR-18  | Thống kê Scan Analytics phản ánh tổng số lượt redirect HTTP (Total Scans), không tính theo người dùng duy nhất (Unique Visitors). |
+| BR-19  | Dữ liệu vị trí trong Analytics trả về mảng rỗng nếu chưa cấu hình dịch vụ IP Geolocation. |
 
 # **10. RÀNG BUỘC, GIẢ ĐỊNH VÀ PHỤ THUỘC**
 

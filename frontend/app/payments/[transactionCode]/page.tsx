@@ -8,6 +8,7 @@ import { DashboardShell } from "@/components/layout/DashboardShell";
 import { Button } from "@/components/common/Button";
 import { api, messageFromError } from "@/lib/api";
 import { bankMap } from "@/lib/constants";
+import { useAuthStore } from "@/stores/auth";
 import type { ApiEnvelope, CreatePaymentResponse } from "@/types";
 
 export default function PaymentPage() {
