@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net/url"
 	"os"
@@ -24,6 +26,7 @@ type Config struct {
 	DBPassword             string
 	DBName                 string
 	DatabaseURL            string
+	DBSSLCA                string
 	JWTAccessSecret        string
 	JWTRefreshSecret       string
 	JWTAccessTTLMin        int
@@ -57,6 +60,7 @@ func Load() Config {
 		DBPassword:             getEnv("DB_PASSWORD", "qr_password"),
 		DBName:                 getEnv("DB_NAME", "qr_generator"),
 		DatabaseURL:            getEnv("DATABASE_URL", ""),
+		DBSSLCA:                getEnv("DB_SSL_CA", ""),
 		JWTAccessSecret:        getEnv("JWT_ACCESS_SECRET", "change-me-access-secret"),
 		JWTRefreshSecret:       getEnv("JWT_REFRESH_SECRET", "change-me-refresh-secret"),
 		JWTAccessTTLMin:        getEnvInt("JWT_ACCESS_TTL_MINUTES", 60),
@@ -86,7 +90,7 @@ func loadEnv() {
 
 func (c Config) DSN() (string, error) {
 	if strings.TrimSpace(c.DatabaseURL) != "" {
-		return mysqlDSNFromURL(c.DatabaseURL)
+		return mysqlDSNFromURL(c.DatabaseURL, c.DBSSLCA)
 	}
 
 	cfg := mysqlcfg.Config{
@@ -105,7 +109,7 @@ func (c Config) DSN() (string, error) {
 	return cfg.FormatDSN(), nil
 }
 
-func mysqlDSNFromURL(raw string) (string, error) {
+func mysqlDSNFromURL(raw string, caPath string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return "", fmt.Errorf("invalid DATABASE_URL: %w", err)
@@ -142,6 +146,24 @@ func mysqlDSNFromURL(raw string) (string, error) {
 	}
 	if tls := query.Get("tls"); tls != "" {
 		cfg.TLSConfig = tls
+	}
+	if strings.TrimSpace(caPath) != "" {
+		caPEM, err := os.ReadFile(os.ExpandEnv(strings.TrimSpace(caPath)))
+		if err != nil {
+			return "", fmt.Errorf("read DB_SSL_CA %q: %w", caPath, err)
+		}
+		rootCAs := x509.NewCertPool()
+		if !rootCAs.AppendCertsFromPEM(caPEM) {
+			return "", fmt.Errorf("DB_SSL_CA %q does not contain a valid PEM certificate", caPath)
+		}
+		if err := mysqlcfg.RegisterTLSConfig("aiven", &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			RootCAs:    rootCAs,
+			ServerName: u.Hostname(),
+		}); err != nil {
+			return "", fmt.Errorf("register Aiven TLS config: %w", err)
+		}
+		cfg.TLSConfig = "aiven"
 	}
 
 	return cfg.FormatDSN(), nil
