@@ -16,13 +16,18 @@ func Connect(cfg config.Config, logger *zap.Logger) *gorm.DB {
 		zap.String("db_port", cfg.DBPort),
 		zap.String("db_user", cfg.DBUser),
 		zap.String("db_name", cfg.DBName),
+		zap.Bool("database_url_configured", strings.TrimSpace(cfg.DatabaseURL) != ""),
 		zap.Int("db_password_length", len(cfg.DBPassword)),
 		zap.Bool("db_password_empty", cfg.DBPassword == ""),
 		zap.Bool("db_password_has_outer_whitespace", strings.TrimSpace(cfg.DBPassword) != cfg.DBPassword),
 	}
 	logger.Info("connecting to database", dbFields...)
 
-	db, err := gorm.Open(mysql.Open(cfg.DSN()), &gorm.Config{})
+	dsn, err := cfg.DSN()
+	if err != nil {
+		logger.Fatal("invalid database configuration", zap.Error(err))
+	}
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
 		logger.Fatal("database connection failed", append(dbFields, zap.Error(err))...)
 	}
