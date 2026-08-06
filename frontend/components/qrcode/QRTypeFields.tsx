@@ -27,7 +27,6 @@ export function QRTypeFields({ qrType, onChangeContent, isProUser }: QRTypeField
   const [vEmail, setVEmail] = useState("");
   const [vCompany, setVCompany] = useState("");
   const [vTitle, setVTitle] = useState("");
-  const [vWebsite, setVWebsite] = useState("");
 
   // Email states
   const [emailTo, setEmailTo] = useState("");
@@ -68,7 +67,6 @@ export function QRTypeFields({ qrType, onChangeContent, isProUser }: QRTypeField
           vEmail ? `EMAIL:${vEmail}` : "",
           vCompany ? `ORG:${vCompany}` : "",
           vTitle ? `TITLE:${vTitle}` : "",
-          vWebsite ? `URL:${vWebsite}` : "",
           "END:VCARD"
         ]
           .filter(Boolean)
@@ -105,7 +103,6 @@ export function QRTypeFields({ qrType, onChangeContent, isProUser }: QRTypeField
     vEmail,
     vCompany,
     vTitle,
-    vWebsite,
     emailTo,
     emailSubject,
     emailBody,
@@ -259,16 +256,6 @@ export function QRTypeFields({ qrType, onChangeContent, isProUser }: QRTypeField
               value={vTitle}
               onChange={(e) => setVTitle(e.target.value)}
               placeholder="Software Engineer"
-              className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2"
-            />
-          </label>
-          <label className="text-sm font-medium text-ink sm:col-span-2">
-            Website URL
-            <input
-              type="url"
-              value={vWebsite}
-              onChange={(e) => setVWebsite(e.target.value)}
-              placeholder="https://example.com"
               className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2"
             />
           </label>

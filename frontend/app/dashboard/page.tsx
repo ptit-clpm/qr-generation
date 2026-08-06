@@ -4,12 +4,16 @@ import { useEffect, useState } from "react";
 import { BarChart3, CreditCard, QrCode, Zap } from "lucide-react";
 import { DashboardShell } from "@/components/layout/DashboardShell";
 import { api } from "@/lib/api";
-import type { ApiEnvelope, QRCode } from "@/types";
+import type { ApiEnvelope, PlanName, QRCode, Subscription } from "@/types";
 
 export default function DashboardPage() {
   const [qrs, setQrs] = useState<QRCode[]>([]);
+  const [plan, setPlan] = useState<PlanName>("FREE");
   useEffect(() => {
     api.get<ApiEnvelope<{ items: QRCode[] }>>("/qrcodes").then((res) => setQrs(res.data.data?.items ?? [])).catch(() => setQrs([]));
+    api.get<ApiEnvelope<Subscription>>("/users/subscription")
+      .then((res) => setPlan(res.data.data?.plan?.name ?? "FREE"))
+      .catch(() => setPlan("FREE"));
   }, []);
   const scans = qrs.reduce((sum, qr) => sum + qr.scan_count, 0);
 
@@ -21,7 +25,7 @@ export default function DashboardPage() {
           { label: "QR Codes", value: qrs.length, icon: QrCode },
           { label: "Scans", value: scans, icon: BarChart3 },
           { label: "Dynamic", value: qrs.filter((qr) => qr.is_dynamic).length, icon: Zap },
-          { label: "Plan", value: "Free/Pro", icon: CreditCard }
+          { label: "Plan", value: plan === "PRO" ? "Pro" : "Free", icon: CreditCard }
         ].map((item) => {
           const Icon = item.icon;
           return (

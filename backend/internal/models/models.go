@@ -7,17 +7,17 @@ import (
 )
 
 type User struct {
-	ID           uint              `gorm:"primaryKey" json:"id"`
-	FullName     string            `gorm:"size:150;not null" json:"full_name"`
-	Email        string            `gorm:"size:150;uniqueIndex;not null" json:"email"`
-	PasswordHash string            `gorm:"size:255;not null" json:"-"`
-	PhoneNumber  string            `gorm:"size:30" json:"phone_number"`
-	AvatarURL    string            `gorm:"size:255" json:"avatar_url"`
-	Status       shared.UserStatus `gorm:"size:20;not null;default:ACTIVE" json:"status"`
+	ID            uint              `gorm:"primaryKey" json:"id"`
+	FullName      string            `gorm:"size:150;not null" json:"full_name"`
+	Email         string            `gorm:"size:150;uniqueIndex;not null" json:"email"`
+	PasswordHash  string            `gorm:"size:255;not null" json:"-"`
+	PhoneNumber   string            `gorm:"size:30" json:"phone_number"`
+	AvatarURL     string            `gorm:"size:255" json:"avatar_url"`
+	Status        shared.UserStatus `gorm:"size:20;not null;default:ACTIVE" json:"status"`
 	Roles         []Role            `gorm:"many2many:user_roles;" json:"roles,omitempty"`
 	Subscriptions []Subscription    `gorm:"foreignKey:UserID" json:"subscriptions,omitempty"`
 	CreatedAt     time.Time         `json:"created_at"`
-	UpdatedAt    time.Time         `json:"updated_at"`
+	UpdatedAt     time.Time         `json:"updated_at"`
 }
 
 type Role struct {
@@ -59,6 +59,8 @@ type Subscription struct {
 type Payment struct {
 	ID              uint                 `gorm:"primaryKey" json:"id"`
 	UserID          uint                 `gorm:"not null;index" json:"user_id"`
+	PlanID          uint                 `gorm:"not null;index" json:"plan_id"`
+	Plan            *Plan                `json:"plan,omitempty"`
 	SubscriptionID  *uint                `gorm:"index" json:"subscription_id"`
 	User            User                 `json:"user,omitempty"`
 	Subscription    *Subscription        `json:"subscription,omitempty"`
@@ -68,7 +70,7 @@ type Payment struct {
 	TransactionCode string               `gorm:"size:100;uniqueIndex" json:"transaction_code"`
 	Provider        string               `gorm:"size:50" json:"provider"`
 	ProviderRef     string               `gorm:"size:150" json:"provider_ref"`
-	ProviderPayload string               `gorm:"type:text" json:"provider_payload"`
+	ProviderPayload string               `gorm:"type:text" json:"-"`
 	Status          shared.PaymentStatus `gorm:"size:20;not null;default:PENDING" json:"status"`
 	PaidAt          *time.Time           `json:"paid_at"`
 	CreatedAt       time.Time            `json:"created_at"`
@@ -111,6 +113,11 @@ type QRDesign struct {
 	DotStyle             string                      `gorm:"size:50" json:"dot_style"`
 	FrameStyle           string                      `gorm:"size:50" json:"frame_style"`
 	LogoURL              string                      `gorm:"size:255" json:"logo_url"`
+	LogoPublicID         string                      `gorm:"size:255" json:"logo_public_id"`
+	LogoWidth            int                         `gorm:"default:0" json:"logo_width"`
+	LogoHeight           int                         `gorm:"default:0" json:"logo_height"`
+	LogoFormat           string                      `gorm:"size:20" json:"logo_format"`
+	LogoBytes            int64                       `gorm:"default:0" json:"logo_bytes"`
 	Size                 int                         `gorm:"not null;default:512" json:"size"`
 	ErrorCorrectionLevel shared.ErrorCorrectionLevel `gorm:"size:5;not null;default:M" json:"error_correction_level"`
 	CreatedAt            time.Time                   `json:"created_at"`

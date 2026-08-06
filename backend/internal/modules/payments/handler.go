@@ -136,6 +136,7 @@ func (h *Handler) Create(c *gin.Context) {
 	}
 	payment := models.Payment{
 		UserID:          user.ID,
+		PlanID:          plan.ID,
 		Amount:          plan.Price,
 		Currency:        "VND",
 		PaymentMethod:   method,
@@ -214,8 +215,8 @@ func (h *Handler) SepayWebhook(c *gin.Context) {
 		if locked.Status != shared.PaymentStatusPending {
 			return errPaymentNotPending
 		}
-		var pro models.Plan
-		if err := tx.Where("name = ? AND status = ?", shared.PlanNamePro, shared.PlanStatusActive).First(&pro).Error; err != nil {
+		pro, err := h.planForPayment(tx, locked)
+		if err != nil {
 			return err
 		}
 		sub, err := h.createProSubscription(tx, locked.UserID, pro, now)
@@ -262,8 +263,8 @@ func (h *Handler) MockSuccess(c *gin.Context) {
 	}
 	now := time.Now()
 	err := h.db.Transaction(func(tx *gorm.DB) error {
-		var pro models.Plan
-		if err := tx.Where("name = ? AND status = ?", shared.PlanNamePro, shared.PlanStatusActive).First(&pro).Error; err != nil {
+		pro, err := h.planForPayment(tx, payment)
+		if err != nil {
 			return err
 		}
 		sub, err := h.createProSubscription(tx, payment.UserID, pro, now)
@@ -403,8 +404,8 @@ func (h *Handler) checkSepayTransaction(payment *models.Payment) {
 					if locked.Status != shared.PaymentStatusPending {
 						return errPaymentNotPending
 					}
-					var pro models.Plan
-					if err := tx.Where("name = ? AND status = ?", shared.PlanNamePro, shared.PlanStatusActive).First(&pro).Error; err != nil {
+					pro, err := h.planForPayment(tx, locked)
+					if err != nil {
 						return err
 					}
 					sub, err := h.createProSubscription(tx, locked.UserID, pro, now)
@@ -439,6 +440,21 @@ func (h *Handler) newTransactionCode(userID uint) string {
 	prefix = reg.ReplaceAllString(prefix, "")
 
 	return fmt.Sprintf("%s%d%s", prefix, userID, strings.ToUpper(uuid.NewString()[:8]))
+}
+
+// planForPayment resolves the plan selected when the payment was created.
+// A plan may be inactive by the time the provider confirms the payment; that
+// must not strand a payment that was already initiated.
+func (h *Handler) planForPayment(tx *gorm.DB, payment models.Payment) (models.Plan, error) {
+	var plan models.Plan
+	if payment.PlanID != 0 {
+		if err := tx.First(&plan, payment.PlanID).Error; err != nil {
+			return plan, err
+		}
+		return plan, nil
+	}
+	// Compatibility for payments created before PlanID existed.
+	return plan, tx.Where("name = ?", shared.PlanNamePro).First(&plan).Error
 }
 
 func (h *Handler) sepayInfo(payment models.Payment) SepayPaymentInfo {

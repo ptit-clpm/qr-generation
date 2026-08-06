@@ -10,6 +10,11 @@ type DesignRequest struct {
 	DotStyle             string                      `json:"dot_style"`
 	FrameStyle           string                      `json:"frame_style"`
 	LogoURL              string                      `json:"logo_url"`
+	LogoPublicID         string                      `json:"logo_public_id"`
+	LogoWidth            int                         `json:"logo_width"`
+	LogoHeight           int                         `json:"logo_height"`
+	LogoFormat           string                      `json:"logo_format"`
+	LogoBytes            int64                       `json:"logo_bytes"`
 	Size                 int                         `json:"size"`
 	ErrorCorrectionLevel shared.ErrorCorrectionLevel `json:"error_correction_level"`
 }

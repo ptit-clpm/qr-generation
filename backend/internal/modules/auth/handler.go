@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"strings"
 	"time"
 
 	"qr-generator/backend/internal/config"
@@ -32,7 +33,7 @@ func (h *Handler) Register(c *gin.Context) {
 		shared.Error(c, 400, "Password confirmation does not match", nil)
 		return
 	}
-
+	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	var count int64
 	h.db.Model(&models.User{}).Where("email = ?", req.Email).Count(&count)
 	if count > 0 {

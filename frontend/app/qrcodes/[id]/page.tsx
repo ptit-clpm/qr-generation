@@ -74,7 +74,7 @@ export default function QRDetailPage() {
           </section>
           <section className="rounded-md border border-slate-200 bg-white p-5 shadow-soft">
             <p className="mb-4 font-semibold text-ink">{qr.qr_type} · {qr.scan_count} scans</p>
-            <QRPreview value={preview} foreground={qr.design?.foreground_color} background={qr.design?.background_color} />
+            <QRPreview value={preview} foreground={qr.design?.foreground_color} background={qr.design?.background_color} logoUrl={qr.design?.logo_url} />
           </section>
         </div>
       ) : (

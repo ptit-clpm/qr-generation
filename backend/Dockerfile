@@ -10,5 +10,6 @@ FROM alpine:3.20
 WORKDIR /app
 COPY --from=builder /server /server
 COPY .env.example .env.example
+COPY --from=builder /app/aiven-ca.pem /app/aiven-ca.pem
 EXPOSE 8080
 CMD ["/server"]

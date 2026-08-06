@@ -1,8 +1,11 @@
 package admin
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
+	"qr-generator/backend/internal/middleware"
 	"qr-generator/backend/internal/models"
 	"qr-generator/backend/internal/shared"
 
@@ -89,11 +92,35 @@ func (h *Handler) UpdateUserStatus(c *gin.Context) {
 		shared.Error(c, 400, "Validation error", err.Error())
 		return
 	}
-	res := h.db.Model(&models.User{}).Where("id = ?", c.Param("id")).Update("status", req.Status)
+	status := shared.UserStatus(strings.ToUpper(strings.TrimSpace(req.Status)))
+	if !validUserStatus(status) {
+		shared.Error(c, 400, "Invalid user status", nil)
+		return
+	}
+	var target models.User
+	if err := h.db.Preload("Roles").First(&target, c.Param("id")).Error; err != nil {
+		shared.Error(c, 404, "User not found", nil)
+		return
+	}
+	actor, _ := middleware.CurrentUser(c)
+	if actor.ID == target.ID {
+		shared.Error(c, 400, "You cannot change your own status", nil)
+		return
+	}
+	if middleware.HasRole(target, shared.RoleNameAdmin) && status != shared.UserStatusActive {
+		var activeAdmins int64
+		h.db.Model(&models.User{}).Joins("JOIN user_roles ON user_roles.user_id = users.id").Joins("JOIN roles ON roles.id = user_roles.role_id").Where("roles.name = ? AND users.status = ?", shared.RoleNameAdmin, shared.UserStatusActive).Count(&activeAdmins)
+		if activeAdmins <= 1 {
+			shared.Error(c, 409, "Cannot deactivate the last active admin", nil)
+			return
+		}
+	}
+	res := h.db.Model(&models.User{}).Where("id = ?", target.ID).Update("status", status)
 	if res.RowsAffected == 0 {
 		shared.Error(c, 404, "User not found", nil)
 		return
 	}
+	h.audit(c, "UPDATE_USER_STATUS", "User", target.ID, fmt.Sprintf("User %d status changed to %s", target.ID, status))
 	shared.OK(c, "User status updated", nil)
 }
 
@@ -118,11 +145,19 @@ func (h *Handler) UpdateQRStatus(c *gin.Context) {
 		shared.Error(c, 400, "Validation error", err.Error())
 		return
 	}
-	res := h.db.Model(&models.QRCode{}).Where("id = ?", c.Param("id")).Update("status", req.Status)
+	status := shared.QRStatus(strings.ToUpper(strings.TrimSpace(req.Status)))
+	if !validQRStatus(status) {
+		shared.Error(c, 400, "Invalid QR status", nil)
+		return
+	}
+	res := h.db.Model(&models.QRCode{}).Where("id = ?", c.Param("id")).Update("status", status)
 	if res.RowsAffected == 0 {
 		shared.Error(c, 404, "QR code not found", nil)
 		return
 	}
+	var id uint
+	h.db.Model(&models.QRCode{}).Where("id = ?", c.Param("id")).Pluck("id", &id)
+	h.audit(c, "UPDATE_QR_STATUS", "QRCode", id, fmt.Sprintf("QR code %d status changed to %s", id, status))
 	shared.OK(c, "QR status updated", nil)
 }
 
@@ -138,6 +173,15 @@ func (h *Handler) CreatePlan(c *gin.Context) {
 		shared.Error(c, 400, "Validation error", err.Error())
 		return
 	}
+	if err := validatePlanRequest(req); err != nil {
+		shared.Error(c, 400, err.Error(), nil)
+		return
+	}
+	var existing models.Plan
+	if err := h.db.Where("name = ?", req.Name).First(&existing).Error; err == nil {
+		shared.Error(c, 409, "Plan name already exists", nil)
+		return
+	}
 	plan := models.Plan{
 		Name: req.Name, Price: req.Price, DurationDays: req.DurationDays, MaxQRCodes: req.MaxQRCodes,
 		AllowDynamicQR: req.AllowDynamicQR, AllowLogo: req.AllowLogo, AllowAnalytics: req.AllowAnalytics,
@@ -150,6 +194,7 @@ func (h *Handler) CreatePlan(c *gin.Context) {
 		shared.Error(c, 500, "Could not create plan", nil)
 		return
 	}
+	h.audit(c, "CREATE_PLAN", "Plan", plan.ID, fmt.Sprintf("Created plan %s", plan.Name))
 	shared.Created(c, "Plan created", plan)
 }
 
@@ -157,6 +202,15 @@ func (h *Handler) UpdatePlan(c *gin.Context) {
 	var req PlanRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		shared.Error(c, 400, "Validation error", err.Error())
+		return
+	}
+	if err := validatePlanRequest(req); err != nil {
+		shared.Error(c, 400, err.Error(), nil)
+		return
+	}
+	var existing models.Plan
+	if err := h.db.Where("name = ? AND id <> ?", req.Name, c.Param("id")).First(&existing).Error; err == nil {
+		shared.Error(c, 409, "Plan name already exists", nil)
 		return
 	}
 	updates := map[string]any{
@@ -169,6 +223,9 @@ func (h *Handler) UpdatePlan(c *gin.Context) {
 		shared.Error(c, 404, "Plan not found", nil)
 		return
 	}
+	var id uint
+	h.db.Model(&models.Plan{}).Where("id = ?", c.Param("id")).Pluck("id", &id)
+	h.audit(c, "UPDATE_PLAN", "Plan", id, fmt.Sprintf("Updated plan %s", req.Name))
 	shared.OK(c, "Plan updated", nil)
 }
 
@@ -198,6 +255,7 @@ func (h *Handler) CreateTemplate(c *gin.Context) {
 		template.Status = shared.TemplateStatusActive
 	}
 	h.db.Create(&template)
+	h.audit(c, "CREATE_TEMPLATE", "QRTemplate", template.ID, fmt.Sprintf("Created template %s", template.Name))
 	shared.Created(c, "Template created", template)
 }
 
@@ -216,6 +274,9 @@ func (h *Handler) UpdateTemplate(c *gin.Context) {
 		shared.Error(c, 404, "Template not found", nil)
 		return
 	}
+	var id uint
+	h.db.Model(&models.QRTemplate{}).Where("id = ?", c.Param("id")).Pluck("id", &id)
+	h.audit(c, "UPDATE_TEMPLATE", "QRTemplate", id, fmt.Sprintf("Updated template %s", req.Name))
 	shared.OK(c, "Template updated", nil)
 }
 
@@ -225,7 +286,37 @@ func (h *Handler) DeleteTemplate(c *gin.Context) {
 		shared.Error(c, 404, "Template not found", nil)
 		return
 	}
+	h.audit(c, "DELETE_TEMPLATE", "QRTemplate", 0, fmt.Sprintf("Deleted template %s", c.Param("id")))
 	shared.OK(c, "Template deleted", nil)
+}
+
+func validUserStatus(status shared.UserStatus) bool {
+	return status == shared.UserStatusActive || status == shared.UserStatusLocked || status == shared.UserStatusDeleted
+}
+
+func validQRStatus(status shared.QRStatus) bool {
+	return status == shared.QRStatusActive || status == shared.QRStatusDisabled || status == shared.QRStatusDeleted
+}
+
+func validatePlanRequest(req PlanRequest) error {
+	if req.Name != shared.PlanNameFree && req.Name != shared.PlanNamePro {
+		return fmt.Errorf("invalid plan name")
+	}
+	if req.Price < 0 || req.DurationDays <= 0 || req.MaxQRCodes <= 0 {
+		return fmt.Errorf("price must be non-negative and limits must be greater than zero")
+	}
+	if req.Status != "" && req.Status != shared.PlanStatusActive && req.Status != shared.PlanStatusInactive && req.Status != shared.PlanStatusDeleted {
+		return fmt.Errorf("invalid plan status")
+	}
+	return nil
+}
+
+func (h *Handler) audit(c *gin.Context, action, entityType string, entityID uint, message string) {
+	user, ok := middleware.CurrentUser(c)
+	if !ok {
+		return
+	}
+	_ = h.db.Create(&models.SystemLog{UserID: &user.ID, Action: action, EntityType: entityType, EntityID: &entityID, Level: shared.LogLevelSecurity, Message: message, IPAddress: c.ClientIP()}).Error
 }
 
 func (h *Handler) Logs(c *gin.Context) {

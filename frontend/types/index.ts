@@ -50,6 +50,11 @@ export interface QRDesign {
   foreground_color: string;
   background_color: string;
   logo_url?: string;
+  logo_public_id?: string;
+  logo_width?: number;
+  logo_height?: number;
+  logo_format?: string;
+  logo_bytes?: number;
   size: number;
   error_correction_level: "L" | "M" | "Q" | "H";
 }

@@ -1,6 +1,10 @@
 package qrcodes
 
 import (
+	"bytes"
+	"fmt"
+	"image"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -9,6 +13,7 @@ import (
 	"qr-generator/backend/internal/config"
 	"qr-generator/backend/internal/middleware"
 	"qr-generator/backend/internal/models"
+	"qr-generator/backend/internal/services"
 	"qr-generator/backend/internal/shared"
 	"qr-generator/backend/internal/utils"
 
@@ -17,12 +22,13 @@ import (
 )
 
 type Handler struct {
-	db  *gorm.DB
-	cfg config.Config
+	db         *gorm.DB
+	cfg        config.Config
+	cloudinary *services.CloudinaryService
 }
 
 func NewHandler(db *gorm.DB, cfg config.Config) *Handler {
-	return &Handler{db: db, cfg: cfg}
+	return &Handler{db: db, cfg: cfg, cloudinary: services.NewCloudinaryService(cfg)}
 }
 
 func RegisterRoutes(rg *gin.RouterGroup, db *gorm.DB, cfg config.Config) {
@@ -37,6 +43,8 @@ func RegisterRoutes(rg *gin.RouterGroup, db *gorm.DB, cfg config.Config) {
 	qr.GET("/:id/download", h.Download)
 	qr.GET("/:id/design", h.GetDesign)
 	qr.PUT("/:id/design", h.UpdateDesign)
+	qr.POST("/:id/logo", h.UploadLogo)
+	qr.DELETE("/:id/logo", h.DeleteLogo)
 }
 
 func RegisterPublicRoutes(r *gin.Engine, db *gorm.DB, cfg config.Config) {
@@ -68,8 +76,12 @@ func (h *Handler) Create(c *gin.Context) {
 		shared.Error(c, 403, "This QR type is only available for Pro users", nil)
 		return
 	}
-	if req.Design != nil && req.Design.LogoURL != "" && !plan.AllowLogo {
-		shared.Error(c, 403, "Logo is only available for Pro users", nil)
+	if req.Design != nil && req.Design.LogoURL != "" {
+		if !plan.AllowLogo {
+			shared.Error(c, 403, "Logo is only available for Pro users", nil)
+			return
+		}
+		shared.Error(c, 400, "Logo must be uploaded through the logo upload endpoint", nil)
 		return
 	}
 	if !isPro && h.countUserQRCodes(user.ID) >= int64(plan.MaxQRCodes) {
@@ -239,7 +251,7 @@ func (h *Handler) Download(c *gin.Context) {
 	if qr.Design.Size > 0 {
 		size = qr.Design.Size
 	}
-	png, err := utils.GeneratePNG(content, size)
+	png, err := utils.GeneratePNGWithLogo(content, size, utils.RenderOptions{LogoURL: qr.Design.LogoURL, Foreground: qr.Design.ForegroundColor, Background: qr.Design.BackgroundColor})
 	if err != nil {
 		shared.Error(c, 500, "Could not generate QR image", nil)
 		return
@@ -273,10 +285,111 @@ func (h *Handler) UpdateDesign(c *gin.Context) {
 		shared.Error(c, 403, "Logo is only available for Pro users", nil)
 		return
 	}
+	if req.LogoURL != "" && req.LogoURL != qr.Design.LogoURL {
+		shared.Error(c, 400, "Logo must be uploaded through the logo upload endpoint", nil)
+		return
+	}
 	design := designFromRequest(&req)
+	design.LogoURL = qr.Design.LogoURL
+	design.LogoPublicID = qr.Design.LogoPublicID
+	design.LogoWidth = qr.Design.LogoWidth
+	design.LogoHeight = qr.Design.LogoHeight
+	design.LogoFormat = qr.Design.LogoFormat
+	design.LogoBytes = qr.Design.LogoBytes
 	h.db.Model(&models.QRDesign{}).Where("qr_code_id = ?", qr.ID).Updates(design)
 	h.db.Where("qr_code_id = ?", qr.ID).First(&design)
 	shared.OK(c, "QR design updated", design)
+}
+
+func (h *Handler) UploadLogo(c *gin.Context) {
+	user, _ := middleware.CurrentUser(c)
+	qr, ok := h.findOwnedQR(c, user.ID)
+	if !ok {
+		return
+	}
+	plan, _ := h.currentPlan(user.ID)
+	if !plan.AllowLogo {
+		shared.Error(c, http.StatusForbidden, "Logo upload is only available for Pro users", nil)
+		return
+	}
+	if !h.cfg.CloudinaryEnabled {
+		shared.Error(c, http.StatusServiceUnavailable, "Logo upload is currently disabled because Cloudinary is not configured", nil)
+		return
+	}
+	maxBytes := h.cfg.CloudinaryMaxUploadBytes
+	if maxBytes <= 0 {
+		maxBytes = 5 * 1024 * 1024
+	}
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		shared.Error(c, http.StatusBadRequest, "Logo file is required", nil)
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err != nil || int64(len(data)) > maxBytes {
+		shared.Error(c, http.StatusBadRequest, fmt.Sprintf("Logo file must not exceed %d bytes", maxBytes), nil)
+		return
+	}
+	contentType := http.DetectContentType(data)
+	allowed := map[string]bool{"image/png": true, "image/jpeg": true, "image/webp": true}
+	if !allowed[contentType] {
+		shared.Error(c, http.StatusBadRequest, "Only PNG, JPEG, and WebP logo files are supported", nil)
+		return
+	}
+	decoded, format, err := image.Decode(bytes.NewReader(data))
+	if err != nil || decoded.Bounds().Dx() <= 0 || decoded.Bounds().Dy() <= 0 {
+		shared.Error(c, http.StatusBadRequest, "The uploaded file is not a valid image", nil)
+		return
+	}
+	if decoded.Bounds().Dx() > 4096 || decoded.Bounds().Dy() > 4096 {
+		shared.Error(c, http.StatusBadRequest, "Logo dimensions must not exceed 4096x4096 pixels", nil)
+		return
+	}
+	if format == "jpeg" {
+		format = "jpg"
+	}
+	asset, err := h.cloudinary.Upload(bytes.NewReader(data), header.Filename, user.ID, qr.ID)
+	if err != nil {
+		shared.Error(c, http.StatusBadGateway, err.Error(), nil)
+		return
+	}
+	oldPublicID := qr.Design.LogoPublicID
+	updates := map[string]any{"logo_url": asset.SecureURL, "logo_public_id": asset.PublicID, "logo_width": decoded.Bounds().Dx(), "logo_height": decoded.Bounds().Dy(), "logo_format": format, "logo_bytes": int64(len(data)), "error_correction_level": shared.ErrorCorrectionLevelH}
+	if err := h.db.Model(&models.QRDesign{}).Where("qr_code_id = ?", qr.ID).Updates(updates).Error; err != nil {
+		_ = h.cloudinary.Delete(asset.PublicID)
+		shared.Error(c, http.StatusInternalServerError, "Could not save logo metadata", nil)
+		return
+	}
+	if oldPublicID != "" && oldPublicID != asset.PublicID {
+		if err := h.cloudinary.Delete(oldPublicID); err != nil {
+			shared.Error(c, http.StatusInternalServerError, "Logo saved, but the previous Cloudinary asset could not be deleted", nil)
+			return
+		}
+	}
+	h.db.Where("qr_code_id = ?", qr.ID).First(&qr.Design)
+	shared.OK(c, "Logo uploaded", qr.Design)
+}
+
+func (h *Handler) DeleteLogo(c *gin.Context) {
+	user, _ := middleware.CurrentUser(c)
+	qr, ok := h.findOwnedQR(c, user.ID)
+	if !ok {
+		return
+	}
+	if qr.Design.LogoPublicID != "" {
+		if err := h.cloudinary.Delete(qr.Design.LogoPublicID); err != nil {
+			shared.Error(c, http.StatusBadGateway, "Could not delete logo from Cloudinary", nil)
+			return
+		}
+	}
+	updates := map[string]any{"logo_url": "", "logo_public_id": "", "logo_width": 0, "logo_height": 0, "logo_format": "", "logo_bytes": 0, "error_correction_level": shared.ErrorCorrectionLevelM}
+	if err := h.db.Model(&models.QRDesign{}).Where("qr_code_id = ?", qr.ID).Updates(updates).Error; err != nil {
+		shared.Error(c, http.StatusInternalServerError, "Logo was removed from Cloudinary but database cleanup failed", nil)
+		return
+	}
+	h.db.Where("qr_code_id = ?", qr.ID).First(&qr.Design)
+	shared.OK(c, "Logo deleted", qr.Design)
 }
 
 func (h *Handler) Redirect(c *gin.Context) {

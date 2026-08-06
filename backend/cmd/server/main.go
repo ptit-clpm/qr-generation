@@ -18,6 +18,9 @@ func main() {
 		logger, _ = zap.NewDevelopment()
 	}
 	defer logger.Sync()
+	if err := cfg.ValidateForProduction(); err != nil {
+		logger.Fatal("invalid production configuration", zap.Error(err))
+	}
 
 	db := database.Connect(cfg, logger)
 	if err := database.Seed(db, cfg); err != nil {
@@ -31,4 +34,3 @@ func main() {
 		logger.Fatal("server failed", zap.Error(err))
 	}
 }
- 

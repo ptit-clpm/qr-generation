@@ -9,6 +9,9 @@ export const api = axios.create({
 });
 
 api.interceptors.request.use((config) => {
+	if (typeof FormData !== "undefined" && config.data instanceof FormData) {
+		if (config.headers) delete config.headers["Content-Type"];
+	}
   if (typeof window !== "undefined") {
     const token = window.localStorage.getItem("access_token");
     if (token) {

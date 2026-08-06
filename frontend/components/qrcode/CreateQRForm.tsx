@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, Save } from "lucide-react";
+import { Download, Save, Trash2, Upload } from "lucide-react";
 import { api, messageFromError } from "@/lib/api";
 import { backendUrl, qrTypes } from "@/lib/constants";
 import { Button } from "@/components/common/Button";
@@ -36,6 +36,9 @@ export function CreateQRForm({ onSaved }: CreateQRFormProps) {
   const [created, setCreated] = useState<QRCode | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState("");
+  const [logoUploading, setLogoUploading] = useState(false);
 
   useEffect(() => {
     if (!user) {
@@ -95,11 +98,23 @@ export function CreateQRForm({ onSaved }: CreateQRFormProps) {
         design: { foreground_color: foreground, background_color: background, size: 512, error_correction_level: "M" }
       });
       const newQr = res.data.data ?? null;
-      setCreated(newQr);
-      if (newQr) {
-        onSaved?.(newQr);
+      let savedQr = newQr;
+      if (newQr && logoFile) {
+        setLogoUploading(true);
+        const form = new FormData();
+        form.append("file", logoFile);
+        const logoRes = await api.post<ApiEnvelope<QRCode["design"]>>(`/qrcodes/${newQr.id}/logo`, form);
+        savedQr = { ...newQr, design: logoRes.data.data ?? newQr.design };
+        setLogoFile(null);
+        setLogoPreview("");
+        setLogoUploading(false);
+      }
+      setCreated(savedQr);
+      if (savedQr) {
+        onSaved?.(savedQr);
       }
     } catch (err) {
+      setLogoUploading(false);
       setError(messageFromError(err));
     } finally {
       setLoading(false);
@@ -117,6 +132,16 @@ export function CreateQRForm({ onSaved }: CreateQRFormProps) {
     URL.revokeObjectURL(url);
   }
 
+  async function deleteLogo() {
+    if (!created?.design?.logo_url) return;
+    try {
+      const res = await api.delete<ApiEnvelope<QRCode["design"]>>(`/qrcodes/${created.id}/logo`);
+      setCreated({ ...created, design: res.data.data ?? { ...created.design, logo_url: "" } });
+    } catch (err) {
+      setError(messageFromError(err));
+    }
+  }
+
   const isLocalhostBackend = backendUrl.includes("localhost") || backendUrl.includes("127.0.0.1");
 
   return (
@@ -127,6 +152,35 @@ export function CreateQRForm({ onSaved }: CreateQRFormProps) {
             Title
             <input value={title} onChange={(e) => setTitle(e.target.value)} className="focus-ring mt-1 w-full rounded-md border border-slate-200 px-3 py-2" />
           </label>
+
+          <div className="md:col-span-2 rounded-md border border-slate-200 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-ink">Logo / Icon</p>
+                <p className="mt-1 text-xs text-muted">PNG, JPEG hoặc WebP · tối đa 5 MB · chỉ tài khoản Pro</p>
+              </div>
+              {!isProUser ? <span className="rounded bg-amber-500/10 px-2 py-1 text-xs text-amber-800">Cần nâng cấp Pro</span> : null}
+            </div>
+            {isProUser ? (
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm">
+                  <Upload className="h-4 w-4" /> Chọn logo
+                  <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) { setError("Logo phải là PNG, JPEG hoặc WebP"); return; }
+                    if (file.size > 5 * 1024 * 1024) { setError("Logo không được vượt quá 5 MB"); return; }
+                    setLogoFile(file);
+                    setLogoPreview(URL.createObjectURL(file));
+                    setError("");
+                  }} />
+                </label>
+                {logoFile ? <span className="text-xs text-muted">{logoFile.name} · {(logoFile.size / 1024).toFixed(0)} KB</span> : null}
+                {logoFile ? <button type="button" className="text-coral" onClick={() => { setLogoFile(null); setLogoPreview(""); }}><Trash2 className="h-4 w-4" /></button> : null}
+                {logoPreview ? <img src={logoPreview} alt="Logo preview" className="h-12 w-12 rounded border object-contain" /> : null}
+              </div>
+            ) : <p className="mt-3 text-xs text-muted">Logo bị khóa trên gói Free.</p>}
+          </div>
           <label className="text-sm font-medium text-ink">
             Type
             <select
@@ -205,9 +259,9 @@ export function CreateQRForm({ onSaved }: CreateQRFormProps) {
 
         {error ? <p className="mt-4 rounded-md bg-coral/10 px-3 py-2 text-sm text-coral">{error}</p> : null}
         <div className="mt-5 flex flex-wrap gap-3">
-          <Button onClick={submit} disabled={loading}>
+          <Button onClick={submit} disabled={loading || logoUploading}>
             <Save className="h-4 w-4" />
-            {loading ? "Saving" : "Save QR"}
+            {logoUploading ? "Uploading logo" : loading ? "Saving" : "Save QR"}
           </Button>
           {created ? (
             <Button tone="secondary" onClick={download}>
@@ -221,8 +275,9 @@ export function CreateQRForm({ onSaved }: CreateQRFormProps) {
       <section className="rounded-md border border-slate-200 bg-white p-5 shadow-soft">
         <h2 className="text-lg font-semibold text-ink">Preview</h2>
         <div className="mt-4 flex justify-center">
-          <QRPreview value={previewValue} foreground={foreground} background={background} />
+          <QRPreview value={previewValue} foreground={foreground} background={background} logoUrl={logoPreview || created?.design?.logo_url} />
         </div>
+        {created?.design?.logo_url ? <button type="button" onClick={deleteLogo} className="mt-3 inline-flex items-center gap-2 text-sm text-coral"><Trash2 className="h-4 w-4" /> Xóa logo đã lưu</button> : null}
 
         {isDynamic && isLocalhostBackend ? (
           <div className="mt-4 rounded-md bg-sky-500/10 border border-sky-500/20 p-3 text-xs text-sky-800">

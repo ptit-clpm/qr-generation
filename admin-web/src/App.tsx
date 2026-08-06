@@ -2,14 +2,18 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "re
 import {
   BarChart3,
   CreditCard,
+  Edit3,
   LayoutDashboard,
   ListChecks,
   LogOut,
+  Plus,
   QrCode,
   RefreshCw,
   Search,
+  Save,
   Shield,
-  Users
+  Users,
+  X
 } from "lucide-react";
 
 type RoleName = "USER" | "ADMIN";
@@ -86,6 +90,8 @@ interface Plan {
   status: PlanStatus;
 }
 
+type PlanDraft = Omit<Plan, "id">;
+
 interface SystemLog {
   id: number;
   action: string;
@@ -104,7 +110,7 @@ interface AuthPayload {
 
 type TabKey = "dashboard" | "users" | "qrcodes" | "payments" | "plans" | "logs";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080/api/v1";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() || (import.meta.env.DEV ? "http://localhost:8080/api/v1" : "");
 
 const tabs: Array<{ key: TabKey; label: string; icon: typeof LayoutDashboard }> = [
   { key: "dashboard", label: "Tổng quan", icon: LayoutDashboard },
@@ -139,7 +145,7 @@ function App() {
     setLoading(true);
     setError("");
     try {
-      const [dashboardData, usersData, qrsData, paymentsData, plansData, logsData] = await Promise.all([
+      const results = await Promise.allSettled([
         api.get<AdminDashboard>("/admin/dashboard"),
         api.get<User[]>("/admin/users"),
         api.get<QRCodeItem[]>("/admin/qrcodes"),
@@ -147,12 +153,15 @@ function App() {
         api.get<Plan[]>("/admin/plans"),
         api.get<SystemLog[]>("/admin/logs")
       ]);
-      setDashboard(dashboardData);
-      setUsers(usersData);
-      setQrcodes(qrsData);
-      setPayments(paymentsData);
-      setPlans(plansData);
-      setLogs(logsData);
+      const [dashboardResult, usersResult, qrsResult, paymentsResult, plansResult, logsResult] = results;
+      if (dashboardResult.status === "fulfilled") setDashboard(dashboardResult.value);
+      if (usersResult.status === "fulfilled") setUsers(usersResult.value);
+      if (qrsResult.status === "fulfilled") setQrcodes(qrsResult.value);
+      if (paymentsResult.status === "fulfilled") setPayments(paymentsResult.value);
+      if (plansResult.status === "fulfilled") setPlans(plansResult.value);
+      if (logsResult.status === "fulfilled") setLogs(logsResult.value);
+      const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (failed) throw failed.reason;
     } catch (err) {
       setError(messageFromError(err));
     } finally {
@@ -178,6 +187,15 @@ function App() {
   async function updateQRStatus(qr: QRCodeItem, status: QRStatus) {
     await api.put(`/admin/qrcodes/${qr.id}/status`, { status });
     setQrcodes((items) => items.map((item) => item.id === qr.id ? { ...item, status } : item));
+  }
+
+  async function savePlan(draft: PlanDraft, id?: number) {
+    if (id) {
+      await api.put(`/admin/plans/${id}`, draft);
+    } else {
+      await api.post<Plan>("/admin/plans", draft);
+    }
+    await loadAll();
   }
 
   if (!token) {
@@ -236,7 +254,7 @@ function App() {
         {activeTab === "users" ? <UsersView users={visibleUsers} onStatusChange={updateUserStatus} /> : null}
         {activeTab === "qrcodes" ? <QRCodesView qrcodes={visibleQRCodes} onStatusChange={updateQRStatus} /> : null}
         {activeTab === "payments" ? <PaymentsView payments={visiblePayments} /> : null}
-        {activeTab === "plans" ? <PlansView plans={plans} /> : null}
+        {activeTab === "plans" ? <PlansView plans={plans} onSave={savePlan} /> : null}
         {activeTab === "logs" ? <LogsView logs={visibleLogs} /> : null}
       </main>
     </div>
@@ -369,6 +387,11 @@ function QRCodesView({ qrcodes, onStatusChange }: { qrcodes: QRCodeItem[]; onSta
 
 function PaymentsView({ payments }: { payments: Payment[] }) {
   const revenue = payments.filter((payment) => payment.status === "SUCCESS").reduce((sum, payment) => sum + payment.amount, 0);
+  const successful = payments.filter((payment) => payment.status === "SUCCESS").length;
+  const pending = payments.filter((payment) => payment.status === "PENDING").length;
+  const failed = payments.filter((payment) => ["FAILED", "CANCELLED", "REFUNDED"].includes(payment.status)).length;
+  const monthlyRevenue = buildMonthlyRevenue(payments);
+  const methods = buildPaymentMethods(payments);
   return (
     <div className="stack">
       <section className="panel split-panel">
@@ -379,6 +402,32 @@ function PaymentsView({ payments }: { payments: Payment[] }) {
         <div>
           <p className="panel-label">Giao dịch</p>
           <strong>{payments.length}</strong>
+        </div>
+      </section>
+      <div className="chart-grid">
+        <RevenueLineChart data={monthlyRevenue} />
+        <section className="panel chart-panel">
+          <div className="chart-heading">
+            <div><p className="panel-label">Trạng thái giao dịch</p><h2>Tổng quan thanh toán</h2></div>
+            <CreditCard size={20} />
+          </div>
+          <div className="status-bars">
+            <StatBar label="Thành công" value={successful} total={payments.length} tone="success" />
+            <StatBar label="Đang chờ" value={pending} total={payments.length} tone="pending" />
+            <StatBar label="Thất bại / hủy" value={failed} total={payments.length} tone="failed" />
+          </div>
+        </section>
+      </div>
+      <section className="panel chart-panel">
+        <div className="chart-heading"><div><p className="panel-label">Phương thức thanh toán</p><h2>Doanh thu theo phương thức</h2></div></div>
+        <div className="method-list">
+          {methods.length > 0 ? methods.map((method) => (
+            <div className="method-row" key={method.label}>
+              <div className="method-label"><span className="method-dot" />{method.label}</div>
+              <div className="method-track"><span style={{ width: `${method.percent}%` }} /></div>
+              <strong>{formatMoney(method.amount)}</strong>
+            </div>
+          )) : <p className="empty-cell">Chưa có dữ liệu thanh toán thành công</p>}
         </div>
       </section>
       <Table
@@ -397,23 +446,88 @@ function PaymentsView({ payments }: { payments: Payment[] }) {
   );
 }
 
-function PlansView({ plans }: { plans: Plan[] }) {
+function PlansView({ plans, onSave }: { plans: Plan[]; onSave: (draft: PlanDraft, id?: number) => Promise<void> }) {
+  const [editing, setEditing] = useState<Plan | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const draft: PlanDraft = {
+      name: form.get("name") as Plan["name"], price: Number(form.get("price")),
+      duration_days: Number(form.get("duration_days")), max_qr_codes: Number(form.get("max_qr_codes")),
+      allow_dynamic_qr: form.get("allow_dynamic_qr") === "on", allow_logo: form.get("allow_logo") === "on",
+      allow_analytics: form.get("allow_analytics") === "on", allow_svg_pdf_export: form.get("allow_svg_pdf_export") === "on",
+      description: String(form.get("description") ?? ""), status: form.get("status") as PlanStatus
+    };
+    if (draft.price < 0 || draft.duration_days <= 0 || draft.max_qr_codes <= 0) {
+      setFormError("Giá không âm; thời hạn và giới hạn QR phải lớn hơn 0.");
+      return;
+    }
+    setSaving(true); setFormError("");
+    try { await onSave(draft, editing?.id); setShowForm(false); }
+    catch (err) { setFormError(messageFromError(err)); }
+    finally { setSaving(false); }
+  }
+
   return (
-    <Table
-      headers={["ID", "Gói", "Giá", "Ngày", "QR tối đa", "Dynamic", "Logo", "Analytics", "Trạng thái"]}
-      rows={plans.map((plan) => [
-        plan.id,
-        plan.name,
-        formatMoney(plan.price),
-        plan.duration_days,
-        plan.max_qr_codes,
-        plan.allow_dynamic_qr ? "Có" : "Không",
-        plan.allow_logo ? "Có" : "Không",
-        plan.allow_analytics ? "Có" : "Không",
-        <StatusBadge status={plan.status} key="status" />
-      ])}
-    />
+    <div className="stack">
+      <div className="section-actions"><div><p className="panel-label">Gói dịch vụ</p><h2>Quản lý giá và tính năng</h2></div><button className="primary-button compact-button" onClick={() => { setEditing(null); setFormError(""); setShowForm(true); }}><Plus size={16} /> Thêm gói</button></div>
+      {showForm ? <form className="panel plan-form" onSubmit={submit}>
+        <div className="form-heading"><h2>{editing ? "Chỉnh sửa gói" : "Tạo gói mới"}</h2><button type="button" className="icon-button secondary-button" onClick={() => setShowForm(false)}><X size={18} /></button></div>
+        <div className="form-grid">
+          <label>Tên gói<select name="name" defaultValue={editing?.name ?? "FREE"}><option value="FREE">FREE</option><option value="PRO">PRO</option></select></label>
+          <label>Trạng thái<select name="status" defaultValue={editing?.status ?? "ACTIVE"}><option value="ACTIVE">ACTIVE</option><option value="INACTIVE">INACTIVE</option><option value="DELETED">DELETED</option></select></label>
+          <label>Giá (VND)<input name="price" type="number" min="0" defaultValue={editing?.price ?? 0} required /></label>
+          <label>Thời hạn (ngày)<input name="duration_days" type="number" min="1" defaultValue={editing?.duration_days ?? 30} required /></label>
+          <label>QR tối đa<input name="max_qr_codes" type="number" min="1" defaultValue={editing?.max_qr_codes ?? 10} required /></label>
+          <label>Mô tả<input name="description" defaultValue={editing?.description ?? ""} /></label>
+        </div>
+        <div className="check-grid">{[["allow_dynamic_qr", "Dynamic QR", editing?.allow_dynamic_qr], ["allow_logo", "Logo", editing?.allow_logo], ["allow_analytics", "Analytics", editing?.allow_analytics], ["allow_svg_pdf_export", "SVG / PDF", editing?.allow_svg_pdf_export]].map(([name, label, checked]) => <label className="check-label" key={name as string}><input type="checkbox" name={name as string} defaultChecked={checked as boolean | undefined} />{label as string}</label>)}</div>
+        {formError ? <p className="alert">{formError}</p> : null}
+        <button className="primary-button form-submit" disabled={saving}><Save size={16} />{saving ? "Đang lưu..." : "Lưu gói"}</button>
+      </form> : null}
+      <Table headers={["ID", "Gói", "Giá", "Ngày", "QR tối đa", "Tính năng", "Trạng thái", "Thao tác"]} rows={plans.map((plan) => [plan.id, plan.name, formatMoney(plan.price), plan.duration_days, plan.max_qr_codes, [plan.allow_dynamic_qr && "Dynamic", plan.allow_logo && "Logo", plan.allow_analytics && "Analytics", plan.allow_svg_pdf_export && "SVG/PDF"].filter(Boolean).join(", ") || "Cơ bản", <StatusBadge status={plan.status} key="status" />, <button className="table-action" key="action" onClick={() => { setEditing(plan); setFormError(""); setShowForm(true); }}><Edit3 size={15} /> Sửa</button>])} />
+    </div>
   );
+}
+
+interface RevenuePoint { label: string; amount: number; }
+interface PaymentMethodStat { label: string; amount: number; percent: number; }
+
+function buildMonthlyRevenue(payments: Payment[]): RevenuePoint[] {
+  const now = new Date();
+  const months = Array.from({ length: 6 }, (_, index) => new Date(now.getFullYear(), now.getMonth() - 5 + index, 1));
+  return months.map((month) => {
+    const key = `${month.getFullYear()}-${month.getMonth()}`;
+    const amount = payments.filter((payment) => payment.status === "SUCCESS" && payment.paid_at && (() => {
+      const date = new Date(payment.paid_at);
+      return `${date.getFullYear()}-${date.getMonth()}` === key;
+    })()).reduce((sum, payment) => sum + payment.amount, 0);
+    return { label: new Intl.DateTimeFormat("vi-VN", { month: "short" }).format(month), amount };
+  });
+}
+
+function buildPaymentMethods(payments: Payment[]): PaymentMethodStat[] {
+  const totals = new Map<string, number>();
+  payments.filter((payment) => payment.status === "SUCCESS").forEach((payment) => totals.set(payment.payment_method, (totals.get(payment.payment_method) ?? 0) + payment.amount));
+  const total = [...totals.values()].reduce((sum, amount) => sum + amount, 0);
+  return [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([label, amount]) => ({ label, amount, percent: total ? (amount / total) * 100 : 0 }));
+}
+
+function RevenueLineChart({ data }: { data: RevenuePoint[] }) {
+  const width = 640; const height = 220; const padding = 28;
+  const max = Math.max(...data.map((item) => item.amount), 1);
+  const points = data.map((item, index) => ({ x: padding + (index * (width - padding * 2)) / Math.max(data.length - 1, 1), y: height - padding - (item.amount / max) * (height - padding * 2) }));
+  const line = points.map((point) => `${point.x},${point.y}`).join(" ");
+  return <section className="panel chart-panel"><div className="chart-heading"><div><p className="panel-label">Doanh thu theo tháng</p><h2>6 tháng gần nhất</h2></div><strong>{formatMoney(data.reduce((sum, item) => sum + item.amount, 0))}</strong></div><div className="line-chart"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Biểu đồ doanh thu theo tháng"><line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} className="chart-axis" /><polyline points={line} className="chart-line" />{points.map((point, index) => <g key={data[index].label}><circle cx={point.x} cy={point.y} r="5" className="chart-point" /><text x={point.x} y={height - 7} textAnchor="middle" className="chart-label">{data[index].label}</text></g>)}</svg></div></section>;
+}
+
+function StatBar({ label, value, total, tone }: { label: string; value: number; total: number; tone: string }) {
+  const percent = total ? (value / total) * 100 : 0;
+  return <div className="stat-bar"><div><span>{label}</span><strong>{value}</strong></div><div className="bar-track"><span className={`bar-fill ${tone}`} style={{ width: `${percent}%` }} /></div></div>;
 }
 
 function LogsView({ logs }: { logs: SystemLog[] }) {
@@ -471,21 +585,36 @@ function StatusBadge({ status }: { status: string }) {
 function createApi(token: string, onUnauthorized: () => void) {
   return {
     get: <T,>(path: string) => request<T>(path, { token, onUnauthorized }),
+    post: <T,>(path: string, body: unknown) => request<T>(path, { method: "POST", body: JSON.stringify(body), token, onUnauthorized }),
     put: <T,>(path: string, body: unknown) => request<T>(path, { method: "PUT", body: JSON.stringify(body), token, onUnauthorized })
   };
 }
 
 async function request<T>(path: string, options: RequestInit & { token?: string; onUnauthorized?: () => void } = {}): Promise<T> {
+  if (!API_BASE_URL) {
+    throw new Error("Thiếu VITE_API_BASE_URL. Hãy cấu hình biến môi trường trước khi build admin.");
+  }
   const headers = new Headers(options.headers);
   headers.set("Content-Type", "application/json");
   if (options.token) {
     headers.set("Authorization", `Bearer ${options.token}`);
   }
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+  } catch {
+    throw new Error(`Không thể kết nối API tại ${API_BASE_URL}. Kiểm tra VITE_API_BASE_URL và CORS.`);
+  }
   if (response.status === 401 && options.onUnauthorized) {
     options.onUnauthorized();
   }
-  const payload = await response.json() as ApiEnvelope<T>;
+  const body = await response.text();
+  let payload: ApiEnvelope<T>;
+  try {
+    payload = body ? JSON.parse(body) as ApiEnvelope<T> : { success: false, message: "Empty response" };
+  } catch {
+    payload = { success: false, message: `API trả về dữ liệu không hợp lệ (${response.status})` };
+  }
   if (!response.ok) {
     throw new Error(payload.message || "Request failed");
   }
